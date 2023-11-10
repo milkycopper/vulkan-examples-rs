@@ -158,7 +158,7 @@ impl ImageBuffer {
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RenderResult<Self> {
-        let image_data = image::io::Reader::open(&path)?.decode()?.to_rgba8();
+        let image_data = image_loader::io::Reader::open(&path)?.decode()?.to_rgba8();
         let size = image_data.len();
         let image_buffer = Self::new(
             image_data.width(),

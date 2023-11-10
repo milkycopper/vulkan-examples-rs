@@ -9,7 +9,7 @@ pub enum RenderError {
     IOError(std::io::Error),
     MemoryTypeNotSupported(String),
     LayoutTransitionNotSupported(String),
-    ImageError(image::error::ImageError),
+    ImageError(image_loader::error::ImageError),
     ObjLoadError(tobj::LoadError),
 }
 
@@ -31,8 +31,8 @@ impl From<std::io::Error> for RenderError {
     }
 }
 
-impl From<image::error::ImageError> for RenderError {
-    fn from(value: image::error::ImageError) -> Self {
+impl From<image_loader::error::ImageError> for RenderError {
+    fn from(value: image_loader::error::ImageError) -> Self {
         Self::ImageError(value)
     }
 }
