@@ -3,6 +3,12 @@ name = "vulkan-example-rs"
 version = "0.0.1"
 edition = "2021"
 build = "build.rs"
+description = "Vulkan examples writen in rust"
+license = "MIT"
+authors = ["milkycopper <liuxiaonan@pku.edu.cn>"]
+repository = "https://github.com/milkycopper/vulkan-examples-rs"
+documentation = "https://docs.rs/vulkan-examples-rs"
+readme = "README.md"
 
 [features]
 default = ["vk_api_version_1_0", "vk_validation_layer"]
