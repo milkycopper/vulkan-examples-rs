@@ -1,0 +1,42 @@
+[package]
+name = "vulkan-example-rs"
+version = "0.0.1"
+edition = "2021"
+build = "build.rs"
+
+[features]
+default = ["vk_api_version_1_0", "vk_validation_layer"]
+
+vk_api_version_1_0 = []
+vk_api_version_1_1 = []
+vk_api_version_1_2 = []
+vk_api_version_1_3 = []
+vk_validation_layer = []
+
+[dependencies.ash]
+git = "https://github.com/ash-rs/ash.git"
+package = "ash"
+branch = "0.37-stable"
+features = ["linked"]
+
+[dependencies.ash_window]
+git = "https://github.com/ash-rs/ash.git"
+package = "ash-window"
+branch = "0.37-stable"
+
+[dependencies]
+winit = "0.28.0"
+env_logger = "0.10.0"
+raw-window-handle = "0.5.0"
+glam = "0.24.0"
+memoffset = "0.9.0"
+array-init = "2.1.0"
+image = "0.24.7"
+bytemuck = "1.14.0"
+tobj = "4.0.0"
+
+[build-dependencies]
+glob = "0.3.1"
+
+[[example]]
+name = "triangle"
