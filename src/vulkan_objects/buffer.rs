@@ -2,7 +2,7 @@ use std::{ffi::c_void, marker::PhantomData, rc::Rc};
 
 use ash::{prelude::VkResult, vk};
 
-use super::{Device, Instance, OneTimeCommand};
+use super::{Device, OneTimeCommand};
 use crate::error::{RenderError, RenderResult};
 
 pub struct Buffer<T> {
@@ -35,8 +35,7 @@ impl<T> Buffer<T> {
             let allocate_info = vk::MemoryAllocateInfo::builder()
                 .allocation_size(memory_requirements.size)
                 .memory_type_index(memory_helper::find_memory_type(
-                    device.instance(),
-                    &device.physical_device().upgrade().unwrap(),
+                    &device,
                     &memory_requirements,
                     properties,
                 )?)
@@ -93,18 +92,20 @@ impl<T> Buffer<T> {
     ) -> VkResult<()> {
         assert!(self.size_in_bytes == dst.size_in_bytes);
 
-        unsafe {
-            let command = OneTimeCommand::new_and_begin(self.device.clone(), command_pool)?;
-            self.device.cmd_copy_buffer(
-                *command.vk_command_buffer(),
-                self.buffer,
-                dst.buffer,
-                &[vk::BufferCopy::builder().size(self.size_in_bytes).build()],
-            );
-            command.end_and_submit(queue)?;
+        OneTimeCommand::new(self.device.clone(), command_pool)?.take_and_execute(
+            |command| unsafe {
+                self.device.cmd_copy_buffer(
+                    *command.vk_command_buffer(),
+                    self.buffer,
+                    dst.buffer,
+                    &[vk::BufferCopy::builder().size(self.size_in_bytes).build()],
+                );
+                Ok(())
+            },
+            queue,
+        )?;
 
-            Ok(())
-        }
+        Ok(())
     }
 
     pub fn new_indice_buffer(
@@ -192,14 +193,14 @@ pub mod memory_helper {
     use super::*;
 
     pub fn find_memory_type(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
+        device: &Device,
         requirement: &vk::MemoryRequirements,
         properties: vk::MemoryPropertyFlags,
     ) -> RenderResult<u32> {
         unsafe {
-            let physical_mem_properties =
-                instance.get_physical_device_memory_properties(*physical_device);
+            let physical_mem_properties = device.instance().get_physical_device_memory_properties(
+                *device.physical_device().upgrade().unwrap(),
+            );
             for i in 0..physical_mem_properties.memory_type_count {
                 if (requirement.memory_type_bits & (1 << i)) != 0
                     && (physical_mem_properties.memory_types[i as usize].property_flags

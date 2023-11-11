@@ -48,8 +48,7 @@ impl ImageBuffer {
             let memory_alloc_info = vk::MemoryAllocateInfo::builder()
                 .allocation_size(memory_requirement.size)
                 .memory_type_index(super::memory_helper::find_memory_type(
-                    device.instance(),
-                    &device.physical_device().upgrade().unwrap(),
+                    &device,
                     &memory_requirement,
                     memory_property,
                 )?)
@@ -135,19 +134,21 @@ impl ImageBuffer {
             .dst_access_mask(dst_access_mask)
             .build();
 
-        let command = OneTimeCommand::new_and_begin(self.device.clone(), command_pool)?;
-        unsafe {
-            self.device.cmd_pipeline_barrier(
-                *command.vk_command_buffer(),
-                src_stage_mask,
-                dst_stage_mask,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[barrier],
-            );
-        }
-        command.end_and_submit(queue)?;
+        OneTimeCommand::new(self.device.clone(), command_pool)?.take_and_execute(
+            |command| unsafe {
+                self.device.cmd_pipeline_barrier(
+                    *command.vk_command_buffer(),
+                    src_stage_mask,
+                    dst_stage_mask,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier],
+                );
+                Ok(())
+            },
+            queue,
+        )?;
 
         Ok(())
     }
@@ -222,17 +223,19 @@ impl ImageBuffer {
             )
             .build();
 
-        let command = OneTimeCommand::new_and_begin(device.clone(), command_pool)?;
-        unsafe {
-            device.cmd_copy_buffer_to_image(
-                *command.vk_command_buffer(),
-                staging_buffer.vk_buffer(),
-                image_buffer.image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[image_copy],
-            );
-        }
-        command.end_and_submit(queue)?;
+        OneTimeCommand::new(device.clone(), command_pool)?.take_and_execute(
+            |command| unsafe {
+                device.cmd_copy_buffer_to_image(
+                    *command.vk_command_buffer(),
+                    staging_buffer.vk_buffer(),
+                    image_buffer.image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[image_copy],
+                );
+                Ok(())
+            },
+            queue,
+        )?;
 
         image_buffer.transition_layout(
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -272,8 +275,8 @@ pub mod image_helper {
                 vk::ImageSubresourceRange::builder()
                     .aspect_mask(aspect_flags)
                     .base_mip_level(0)
-                    .base_array_layer(0)
                     .level_count(1)
+                    .base_array_layer(0)
                     .layer_count(1)
                     .build(),
             )

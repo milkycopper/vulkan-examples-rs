@@ -69,15 +69,14 @@ impl Camera {
     }
 
     pub fn translate(&mut self, direction: Direction, distance: f32) {
-        let moving_direction = self.rotation
-            * match direction {
-                Direction::Up => Vec3::Y,
-                Direction::Down => Vec3::NEG_Y,
-                Direction::Left => Vec3::NEG_X,
-                Direction::Right => Vec3::X,
-                Direction::Front => Vec3::Z,
-                Direction::Back => Vec3::NEG_Z,
-            };
+        let moving_direction = match direction {
+            Direction::Up => Vec3::Y,
+            Direction::Down => Vec3::NEG_Y,
+            Direction::Left => Vec3::NEG_X,
+            Direction::Right => Vec3::X,
+            Direction::Front => Vec3::Z,
+            Direction::Back => Vec3::NEG_Z,
+        };
         self.translation += moving_direction * distance;
     }
 

@@ -65,21 +65,21 @@ impl Vertex {
     }
 
     pub fn create_buffer(
-        data: &Vec<Vertex>,
+        data: &Vec<Self>,
         device: Rc<Device>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
-    ) -> RenderResult<Buffer<Vertex>> {
+    ) -> RenderResult<Buffer<Self>> {
         let vertex_num = data.len();
 
-        let staging_buffer = Buffer::<Vertex>::new(
+        let staging_buffer = Buffer::<Self>::new(
             vertex_num,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             device.clone(),
         )?;
 
-        let vertex_buffer = Buffer::<Vertex>::new(
+        let vertex_buffer = Buffer::<Self>::new(
             vertex_num,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,

@@ -9,11 +9,13 @@ use winit::{
 
 pub trait WindowApp {
     fn new(event_loop: &EventLoop<()>) -> Self;
+    fn run(&mut self, event_loop: &mut RefCell<EventLoop<()>>);
     fn draw_frame(&mut self);
+
     fn on_window_resized(&mut self, size: PhysicalSize<u32>);
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode);
+
     fn window_size(&self) -> PhysicalSize<u32>;
-    fn run(&mut self, event_loop: &mut RefCell<EventLoop<()>>);
 
     fn render_loop(&mut self, event_loop: &RefCell<EventLoop<()>>) {
         event_loop
@@ -35,10 +37,12 @@ pub trait WindowApp {
                             },
                         ..
                     } => control_flow.set_exit(),
+
                     Event::WindowEvent {
                         event: WindowEvent::Resized(size),
                         ..
                     } => self.on_window_resized(size),
+
                     Event::WindowEvent {
                         event:
                             WindowEvent::KeyboardInput {
@@ -52,6 +56,7 @@ pub trait WindowApp {
                             },
                         ..
                     } => self.on_keyboard_input(key_code),
+
                     Event::MainEventsCleared => {
                         let size = self.window_size();
                         if size.width > 0 && size.height > 0 {

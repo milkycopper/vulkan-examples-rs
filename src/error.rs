@@ -3,14 +3,14 @@ use std::{error::Error, fmt::Display};
 #[derive(Debug)]
 pub enum RenderError {
     VkResult(ash::vk::Result),
-    PhysicalDeviceNotSupported(String),
-    FormatNotSupported(String),
     WindowCreateError(winit::error::OsError),
     IOError(std::io::Error),
-    MemoryTypeNotSupported(String),
-    LayoutTransitionNotSupported(String),
     ImageError(image_loader::error::ImageError),
     ObjLoadError(tobj::LoadError),
+    PhysicalDeviceNotSupported(String),
+    FormatNotSupported(String),
+    MemoryTypeNotSupported(String),
+    LayoutTransitionNotSupported(String),
 }
 
 impl From<ash::vk::Result> for RenderError {
@@ -47,16 +47,16 @@ impl Display for RenderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::VkResult(res) => write!(f, "{res}"),
-            Self::PhysicalDeviceNotSupported(s) => write!(f, "PHYSICAL DEVICE NOT SUPPORTED: {s}"),
-            Self::FormatNotSupported(s) => write!(f, "FORMAT NOT SUPPORTED: {s}"),
             Self::WindowCreateError(e) => write!(f, "{e}"),
             Self::IOError(e) => write!(f, "{e}"),
+            Self::ImageError(e) => write!(f, "{e}"),
+            Self::ObjLoadError(e) => write!(f, "{e}"),
+            Self::PhysicalDeviceNotSupported(s) => write!(f, "PHYSICAL DEVICE NOT SUPPORTED: {s}"),
+            Self::FormatNotSupported(s) => write!(f, "FORMAT NOT SUPPORTED: {s}"),
             Self::MemoryTypeNotSupported(s) => write!(f, "MEMORY TYPE NOT SUPPORTED: {s}"),
             Self::LayoutTransitionNotSupported(s) => {
                 write!(f, "LAYOUT TRANSITION NOT SUPPORTED: {s}")
             }
-            Self::ImageError(e) => write!(f, "{e}"),
-            Self::ObjLoadError(e) => write!(f, "{e}"),
         }
     }
 }

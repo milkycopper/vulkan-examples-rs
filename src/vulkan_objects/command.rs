@@ -66,6 +66,17 @@ impl<'a> OneTimeCommand<'a> {
 
         Ok(())
     }
+
+    pub fn take_and_execute<F: Fn(&OneTimeCommand) -> VkResult<()>>(
+        &self,
+        f: F,
+        queue: &vk::Queue,
+    ) -> VkResult<()> {
+        self.begin()?;
+        f(self)?;
+        self.end_and_submit(queue)?;
+        Ok(())
+    }
 }
 
 impl<'a> Drop for OneTimeCommand<'a> {

@@ -21,12 +21,17 @@ impl Device {
         let physical_device = instance.pick_physical_device();
         Ok(Self {
             inner: {
+                let priorities = queue_family_indices
+                    .iter()
+                    .map(|q| q.priority)
+                    .collect::<Vec<_>>();
                 let queue_create_infos = queue_family_indices
                     .iter()
-                    .map(|info| {
+                    .enumerate()
+                    .map(|(i, info)| {
                         vk::DeviceQueueCreateInfo::builder()
                             .queue_family_index(info.index)
-                            .queue_priorities(&[info.priority])
+                            .queue_priorities(&priorities[i..(i + 1)])
                             .build()
                     })
                     .collect::<Vec<_>>();
