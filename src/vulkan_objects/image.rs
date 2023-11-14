@@ -10,6 +10,7 @@ pub struct ImageBuffer {
     size_in_bytes: vk::DeviceSize,
     image: vk::Image,
     device_momory: vk::DeviceMemory,
+    format: vk::Format,
     device: Rc<Device>,
 }
 
@@ -61,6 +62,7 @@ impl ImageBuffer {
                 size_in_bytes: memory_requirement.size,
                 image,
                 device_momory,
+                format,
                 device,
             })
         }
@@ -72,6 +74,10 @@ impl ImageBuffer {
 
     pub fn vk_image(&self) -> vk::Image {
         self.image
+    }
+
+    pub fn format(&self) -> vk::Format {
+        self.format
     }
 
     pub fn create_image_view(
@@ -246,6 +252,18 @@ impl ImageBuffer {
         )?;
 
         Ok(image_buffer)
+    }
+
+    pub fn create_depth_buffer(extent: vk::Extent2D, device: Rc<Device>) -> RenderResult<Self> {
+        Self::new(
+            extent.width,
+            extent.height,
+            format_helper::find_depth_format(&device)?,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            device,
+        )
     }
 }
 

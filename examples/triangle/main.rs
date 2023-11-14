@@ -12,12 +12,13 @@ use winit::{
 use vulkan_example_rs::{
     app::WindowApp,
     camera::Camera,
+    error::RenderResult,
     mesh::Vertex,
     queue_family::QueueFamilyIndices,
     transforms::{Direction, MVPMatrix},
     vulkan_objects::{
-        extent_helper, format_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder,
-        QueueInfo, ShaderCreate, Surface, SwapChainBatch,
+        extent_helper, format_helper, image_helper, renderpass_helper, Buffer, Device, ImageBuffer,
+        InstanceBuilder, QueueInfo, ShaderCreate, Surface, SwapChainBatch,
     },
 };
 
@@ -25,13 +26,17 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 struct DrawTriangleApp {
     window: Window,
-    vulkan_objs: VulkanObjects,
-    current_frame: usize,
     window_resized: bool,
-    start_time: SystemTime,
+
+    current_frame: usize,
+    last_time: SystemTime,
+
     model_vertices: Vec<Vertex>,
     model_indices: Vec<u32>,
+
     camera: Camera,
+
+    vulkan_objs: VulkanObjects,
 }
 
 impl WindowApp for DrawTriangleApp {
@@ -74,7 +79,7 @@ impl WindowApp for DrawTriangleApp {
                 .reset_fences(&[vk_objs.in_flight_fences[self.current_frame]])
                 .unwrap();
 
-            vk_objs.record_command(
+            vk_objs.record_render_commands(
                 vk_objs.command_buffers[self.current_frame],
                 vk_objs.swapchain_framebuffers[image_index as usize],
                 vk_objs.descriptor_sets[self.current_frame],
@@ -109,19 +114,19 @@ impl WindowApp for DrawTriangleApp {
                 .loader()
                 .queue_present(vk_objs.present_queue, &present_info_khr);
 
-            let mut need_recreate = false;
-            match result {
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => need_recreate = true,
-                Ok(_) => {}
+            let need_recreate = match result {
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => true,
+                Ok(_) => false,
                 _ => panic!("Failed to present swap chain image"),
-            }
+            };
             if need_recreate || self.window_resized {
                 self.window_resized = false;
                 vk_objs.recreate_swapchain(&self.window);
             }
         };
 
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT
+        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        self.last_time = SystemTime::now();
     }
 
     fn window_size(&self) -> PhysicalSize<u32> {
@@ -134,7 +139,7 @@ impl WindowApp for DrawTriangleApp {
 
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
         let duration = SystemTime::now()
-            .duration_since(self.start_time)
+            .duration_since(self.last_time)
             .unwrap()
             .as_secs_f32();
         match key_code {
@@ -153,31 +158,39 @@ impl WindowApp for DrawTriangleApp {
     }
 
     fn new(event_loop: &EventLoop<()>) -> Self {
-        let name = stringify!(DrawTriangleApp);
-        let model_path = "examples/meshes/triangle/viking_room.obj";
         let window = WindowBuilder::new()
-            .with_title(name)
+            .with_title(stringify!(DrawTriangleApp))
             .with_inner_size(PhysicalSize::new(1800, 1200))
             .build(event_loop)
             .unwrap();
 
         let (model_vertices, model_indices) =
-            vulkan_example_rs::mesh::load_obj_model(model_path).unwrap();
+            vulkan_example_rs::mesh::load_obj_model("examples/meshes/triangle/viking_room.obj")
+                .unwrap();
 
-        let vulkan_objs =
-            helper::create_vulkan_objs(name, "No Engine", &window, &model_vertices, &model_indices);
+        let vulkan_objs = VulkanObjects::new(
+            stringify!(DrawTriangleApp),
+            "No Engine",
+            &window,
+            &model_vertices,
+            &model_indices,
+        );
 
         DrawTriangleApp {
             window,
-            vulkan_objs,
-            current_frame: 0,
             window_resized: false,
-            start_time: SystemTime::now(),
+
+            current_frame: 0,
+            last_time: SystemTime::now(),
+
             model_vertices,
             model_indices,
+
             camera: Camera::default()
-                .with_move_speed(0.004)
-                .with_rotate_speed(4e-4),
+                .with_move_speed(100.)
+                .with_rotate_speed(400.),
+
+            vulkan_objs,
         }
     }
 
@@ -213,230 +226,18 @@ struct VulkanObjects {
     texture_image: ImageBuffer,
     texture_image_view: vk::ImageView,
     texture_image_sampler: vk::Sampler,
-    #[allow(dead_code)]
     depth_buffer: ImageBuffer,
     depth_image_view: vk::ImageView,
 }
 
 impl VulkanObjects {
-    pub fn update_uniform_buffer(
-        &self,
-        camera: &Camera,
-        uniform_buffer: &(Buffer<MVPMatrix>, *mut c_void),
-    ) {
-        let mvp_matrix = MVPMatrix {
-            model: Mat4::from_axis_angle(Vec3::X, 2.3 * core::f32::consts::FRAC_PI_2)
-                * Mat4::from_axis_angle(Vec3::Y, -0.46 * core::f32::consts::FRAC_PI_2)
-                * Mat4::from_axis_angle(Vec3::Z, -1.1 * core::f32::consts::FRAC_PI_2),
-            view: camera.view_transform(),
-            projection: camera.projection_transform(),
-        };
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                &mvp_matrix as *const MVPMatrix,
-                uniform_buffer.1 as *mut MVPMatrix,
-                1,
-            )
-        }
-    }
-
-    pub fn record_command(
-        &self,
-        command_buffer: vk::CommandBuffer,
-        frame_buffer: vk::Framebuffer,
-        descriptor_set: vk::DescriptorSet,
-        _vertex_num: u32,
-        indice_num: u32,
-    ) {
-        unsafe {
-            self.device
-                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::default())
-                .expect("Fail to reset command buffer");
-
-            self.device
-                .begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::default())
-                .expect("Fail to begin command buffer");
-
-            let renderpass_begin_info = vk::RenderPassBeginInfo::builder()
-                .render_pass(self.renderpass)
-                .framebuffer(frame_buffer)
-                .render_area(
-                    vk::Rect2D::builder()
-                        .offset(vk::Offset2D { x: 0, y: 0 })
-                        .extent(self.surface.extent())
-                        .build(),
-                )
-                .clear_values(&[
-                    vk::ClearValue {
-                        color: vk::ClearColorValue {
-                            float32: [0., 0., 0., 1.],
-                        },
-                    },
-                    vk::ClearValue {
-                        depth_stencil: vk::ClearDepthStencilValue {
-                            depth: 1.,
-                            stencil: 0,
-                        },
-                    },
-                ])
-                .build();
-
-            self.device.cmd_begin_render_pass(
-                command_buffer,
-                &renderpass_begin_info,
-                vk::SubpassContents::INLINE,
-            );
-
-            self.device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline,
-            );
-
-            self.device.cmd_bind_vertex_buffers(
-                command_buffer,
-                0,
-                &[self.vertex_buffer.vk_buffer()],
-                &[0],
-            );
-            self.device.cmd_bind_index_buffer(
-                command_buffer,
-                self.indice_buffer.vk_buffer(),
-                0,
-                vk::IndexType::UINT32,
-            );
-
-            self.device.cmd_set_viewport(
-                command_buffer,
-                0,
-                &[extent_helper::viewport_from_extent(self.surface.extent())],
-            );
-
-            self.device.cmd_set_scissor(
-                command_buffer,
-                0,
-                &[extent_helper::scissor_from_extent(self.surface.extent())],
-            );
-
-            self.device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &[descriptor_set],
-                &[],
-            );
-
-            self.device
-                .cmd_draw_indexed(command_buffer, indice_num, 1, 0, 0, 0);
-
-            self.device.cmd_end_render_pass(command_buffer);
-            self.device.end_command_buffer(command_buffer).unwrap();
-        }
-    }
-
-    pub fn recreate_swapchain(&mut self, window: &Window) {
-        unsafe {
-            self.device.device_wait_idle().unwrap();
-
-            self.surface.refit_surface_attribute(window).unwrap();
-
-            self.swapchain_framebuffers
-                .iter()
-                .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
-
-            self.device.destroy_image_view(self.depth_image_view, None);
-            self.swapchain_batch.recreate().unwrap();
-
-            let depth_format = format_helper::find_depth_format(&self.device).unwrap();
-            self.depth_buffer = ImageBuffer::new(
-                self.surface.extent().width,
-                self.surface.extent().height,
-                depth_format,
-                vk::ImageTiling::OPTIMAL,
-                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                self.device.clone(),
-            )
-            .unwrap();
-
-            self.depth_image_view = image_helper::create_image_view(
-                self.depth_buffer.vk_image(),
-                depth_format,
-                vk::ImageAspectFlags::DEPTH,
-                &self.device,
-            )
-            .unwrap();
-
-            self.swapchain_framebuffers = self
-                .swapchain_batch
-                .image_views()
-                .iter()
-                .map(|image_view| {
-                    let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
-                        .render_pass(self.renderpass)
-                        .attachments(&[*image_view, self.depth_image_view])
-                        .width(self.surface.extent().width)
-                        .height(self.surface.extent().height)
-                        .layers(1)
-                        .build();
-
-                    self.device
-                        .create_framebuffer(&framebuffer_create_info, None)
-                        .expect("Fail to create framebuffer")
-                })
-                .collect::<Vec<_>>();
-        }
-    }
-}
-
-impl Drop for VulkanObjects {
-    fn drop(&mut self) {
-        unsafe {
-            [
-                self.image_available_semaphores,
-                self.render_finished_semaphores,
-            ]
-            .concat()
-            .into_iter()
-            .for_each(|sm| self.device.destroy_semaphore(sm, None));
-
-            self.in_flight_fences
-                .into_iter()
-                .for_each(|fence| self.device.destroy_fence(fence, None));
-            self.device
-                .destroy_image_view(self.texture_image_view, None);
-            self.device.destroy_image_view(self.depth_image_view, None);
-            self.device
-                .destroy_sampler(self.texture_image_sampler, None);
-            self.device.destroy_command_pool(self.command_pool, None);
-            self.swapchain_framebuffers
-                .iter()
-                .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_render_pass(self.renderpass, None);
-        }
-    }
-}
-
-mod helper {
-
-    use super::*;
-
-    pub(super) fn create_vulkan_objs(
+    pub fn new(
         app_name: &str,
         engine_name: &str,
         window: &Window,
         vertices: &Vec<Vertex>,
         indices: &Vec<u32>,
-    ) -> VulkanObjects {
+    ) -> Self {
         let instance = Rc::new(
             InstanceBuilder::new(window)
                 .with_app_name_and_version(app_name, 0)
@@ -589,43 +390,16 @@ mod helper {
             .create_image_view(vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)
             .unwrap();
 
-        let depth_format = format_helper::find_depth_format(&device).unwrap();
-        let depth_buffer = ImageBuffer::new(
-            surface.extent().width,
-            surface.extent().height,
-            depth_format,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            device.clone(),
-        )
-        .unwrap();
-        let depth_image_view = image_helper::create_image_view(
-            depth_buffer.vk_image(),
-            depth_format,
-            vk::ImageAspectFlags::DEPTH,
-            &device,
-        )
-        .unwrap();
+        let (depth_buffer, depth_image_view) =
+            helper::create_depth_buffer_and_image_view(surface.extent(), device.clone()).unwrap();
 
-        let framebuffers = swapchain_batch
-            .image_views()
-            .iter()
-            .map(|image_view| {
-                let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
-                    .render_pass(renderpass)
-                    .attachments(&[*image_view, depth_image_view])
-                    .width(surface.extent().width)
-                    .height(surface.extent().height)
-                    .layers(1)
-                    .build();
-                unsafe {
-                    device
-                        .create_framebuffer(&framebuffer_create_info, None)
-                        .expect("Fail to create framebuffer")
-                }
-            })
-            .collect::<Vec<_>>();
+        let framebuffers = helper::create_swapchain_frame_buffer(
+            &swapchain_batch,
+            &renderpass,
+            surface.extent(),
+            &device,
+            &depth_image_view,
+        );
 
         {
             for i in 0..MAX_FRAMES_IN_FLIGHT {
@@ -691,6 +465,221 @@ mod helper {
             depth_buffer,
             depth_image_view,
         }
+    }
+
+    pub fn update_uniform_buffer(
+        &self,
+        camera: &Camera,
+        uniform_buffer: &(Buffer<MVPMatrix>, *mut c_void),
+    ) {
+        let mvp_matrix = MVPMatrix {
+            model: Mat4::from_axis_angle(Vec3::X, 2.3 * core::f32::consts::FRAC_PI_2)
+                * Mat4::from_axis_angle(Vec3::Y, -0.46 * core::f32::consts::FRAC_PI_2)
+                * Mat4::from_axis_angle(Vec3::Z, -1.1 * core::f32::consts::FRAC_PI_2),
+            view: camera.view_transform(),
+            projection: camera.projection_transform(),
+        };
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                &mvp_matrix as *const MVPMatrix,
+                uniform_buffer.1 as *mut MVPMatrix,
+                1,
+            )
+        }
+    }
+
+    pub fn record_render_commands(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        frame_buffer: vk::Framebuffer,
+        descriptor_set: vk::DescriptorSet,
+        _vertex_num: u32,
+        indice_num: u32,
+    ) {
+        unsafe {
+            self.device
+                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::default())
+                .expect("Fail to reset command buffer");
+
+            self.device
+                .begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::default())
+                .expect("Fail to begin command buffer");
+
+            self.device.cmd_begin_render_pass(
+                command_buffer,
+                &renderpass_helper::create_renderpass_begin_info(
+                    &self.renderpass,
+                    &frame_buffer,
+                    self.surface.extent(),
+                ),
+                vk::SubpassContents::INLINE,
+            );
+
+            self.device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+
+            self.device.cmd_bind_vertex_buffers(
+                command_buffer,
+                0,
+                &[self.vertex_buffer.vk_buffer()],
+                &[0],
+            );
+            self.device.cmd_bind_index_buffer(
+                command_buffer,
+                self.indice_buffer.vk_buffer(),
+                0,
+                vk::IndexType::UINT32,
+            );
+
+            self.device.cmd_set_viewport(
+                command_buffer,
+                0,
+                &[extent_helper::viewport_from_extent(self.surface.extent())],
+            );
+
+            self.device.cmd_set_scissor(
+                command_buffer,
+                0,
+                &[extent_helper::scissor_from_extent(self.surface.extent())],
+            );
+
+            self.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline_layout,
+                0,
+                &[descriptor_set],
+                &[],
+            );
+
+            self.device
+                .cmd_draw_indexed(command_buffer, indice_num, 1, 0, 0, 0);
+
+            self.device.cmd_end_render_pass(command_buffer);
+            self.device.end_command_buffer(command_buffer).unwrap();
+        }
+    }
+
+    pub fn recreate_swapchain(&mut self, window: &Window) {
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+
+            self.surface.refit_surface_attribute(window).unwrap();
+            self.recreate_depth_buffer_and_image_view();
+            self.swapchain_batch.recreate().unwrap();
+            self.recreate_swapchain_framebuffers();
+        }
+    }
+
+    pub fn recreate_depth_buffer_and_image_view(&mut self) {
+        unsafe {
+            self.device.destroy_image_view(self.depth_image_view, None);
+            (self.depth_buffer, self.depth_image_view) = helper::create_depth_buffer_and_image_view(
+                self.surface.extent(),
+                self.device.clone(),
+            )
+            .unwrap()
+        }
+    }
+
+    pub fn recreate_swapchain_framebuffers(&mut self) {
+        unsafe {
+            self.swapchain_framebuffers
+                .iter()
+                .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
+            self.swapchain_framebuffers = helper::create_swapchain_frame_buffer(
+                &self.swapchain_batch,
+                &self.renderpass,
+                self.surface.extent(),
+                &self.device,
+                &self.depth_image_view,
+            )
+        }
+    }
+}
+
+impl Drop for VulkanObjects {
+    fn drop(&mut self) {
+        unsafe {
+            [
+                self.image_available_semaphores,
+                self.render_finished_semaphores,
+            ]
+            .concat()
+            .into_iter()
+            .for_each(|sm| self.device.destroy_semaphore(sm, None));
+            self.in_flight_fences
+                .into_iter()
+                .for_each(|fence| self.device.destroy_fence(fence, None));
+            [self.texture_image_view, self.depth_image_view]
+                .into_iter()
+                .for_each(|image_view| self.device.destroy_image_view(image_view, None));
+            self.device
+                .destroy_sampler(self.texture_image_sampler, None);
+            self.device.destroy_command_pool(self.command_pool, None);
+            self.swapchain_framebuffers
+                .iter()
+                .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
+            self.device.destroy_pipeline(self.pipeline, None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+            self.device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.device.destroy_render_pass(self.renderpass, None);
+        }
+    }
+}
+
+mod helper {
+    use super::*;
+
+    pub(super) fn create_depth_buffer_and_image_view(
+        extent: vk::Extent2D,
+        device: Rc<Device>,
+    ) -> RenderResult<(ImageBuffer, vk::ImageView)> {
+        let depth_buffer = ImageBuffer::create_depth_buffer(extent, device.clone())?;
+
+        let depth_image_view = image_helper::create_image_view(
+            depth_buffer.vk_image(),
+            depth_buffer.format(),
+            vk::ImageAspectFlags::DEPTH,
+            &device,
+        )?;
+
+        Ok((depth_buffer, depth_image_view))
+    }
+
+    pub(super) fn create_swapchain_frame_buffer(
+        swapchain_batch: &SwapChainBatch,
+        render_pass: &vk::RenderPass,
+        extent: vk::Extent2D,
+        device: &Device,
+        depth_image_view: &vk::ImageView,
+    ) -> Vec<vk::Framebuffer> {
+        swapchain_batch
+            .image_views()
+            .iter()
+            .map(|image_view| {
+                let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+                    .render_pass(*render_pass)
+                    .attachments(&[*image_view, *depth_image_view])
+                    .width(extent.width)
+                    .height(extent.height)
+                    .layers(1)
+                    .build();
+                unsafe {
+                    device
+                        .create_framebuffer(&framebuffer_create_info, None)
+                        .expect("Fail to create framebuffer")
+                }
+            })
+            .collect::<Vec<_>>()
     }
 
     pub(super) fn create_pipeline(
