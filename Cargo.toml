@@ -27,4 +27,4 @@ winit = "0.28.0"
 glob = "0.3.1"
 
 [[example]]
-name = "triangle"
+name = "viking_room"

@@ -20,7 +20,7 @@ use vulkan_example_rs::{
     },
 };
 
-struct DrawTriangleApp {
+struct VikingRoomApp {
     window: Window,
     window_resized: bool,
 
@@ -35,7 +35,7 @@ struct DrawTriangleApp {
     vulkan_objs: VulkanObjects,
 }
 
-impl WindowApp for DrawTriangleApp {
+impl WindowApp for VikingRoomApp {
     fn draw_frame(&mut self) {
         unsafe {
             let vk_objs = &mut self.vulkan_objs;
@@ -163,24 +163,24 @@ impl WindowApp for DrawTriangleApp {
 
     fn new(event_loop: &EventLoop<()>) -> Self {
         let window = WindowBuilder::new()
-            .with_title(stringify!(DrawTriangleApp))
+            .with_title(stringify!(VikingRoomApp))
             .with_inner_size(PhysicalSize::new(1800, 1200))
             .build(event_loop)
             .unwrap();
 
         let (model_vertices, model_indices) =
-            vulkan_example_rs::mesh::load_obj_model("examples/meshes/triangle/viking_room.obj")
+            vulkan_example_rs::mesh::load_obj_model("examples/meshes/viking_room/viking_room.obj")
                 .unwrap();
 
         let vulkan_objs = VulkanObjects::new(
-            stringify!(DrawTriangleApp),
+            stringify!(VikingRoomApp),
             "No Engine",
             &window,
             &model_vertices,
             &model_indices,
         );
 
-        DrawTriangleApp {
+        VikingRoomApp {
             window,
             window_resized: false,
 
@@ -316,7 +316,7 @@ impl VulkanObjects {
             });
 
         let texture_image = ImageBuffer::color_image_from_file(
-            "examples/textures/triangle/viking_room.png",
+            "examples/textures/viking_room/viking_room.png",
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
@@ -527,14 +527,14 @@ mod helper {
     ) -> (vk::PipelineLayout, vk::Pipeline) {
         let shader_creates = [
             ShaderCreate::with_spv_path(
-                "examples/shaders/triangle/shader.vert.spv",
+                "examples/shaders/viking_room/shader.vert.spv",
                 vk::ShaderStageFlags::VERTEX,
                 ShaderCreate::DEFAULT_SHADER_START_NAME,
                 device.clone(),
             )
             .unwrap(),
             ShaderCreate::with_spv_path(
-                "examples/shaders/triangle/shader.frag.spv",
+                "examples/shaders/viking_room/shader.frag.spv",
                 vk::ShaderStageFlags::FRAGMENT,
                 ShaderCreate::DEFAULT_SHADER_START_NAME,
                 device.clone(),
@@ -686,8 +686,7 @@ mod helper {
 }
 
 fn main() {
-    println!("Hello vulkan triangle demo");
     let mut event_loop = RefCell::new(EventLoop::new());
-    let mut app = DrawTriangleApp::new(&event_loop.borrow());
+    let mut app = VikingRoomApp::new(&event_loop.borrow());
     app.run(&mut event_loop);
 }
