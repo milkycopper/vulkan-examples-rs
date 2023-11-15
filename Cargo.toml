@@ -1,36 +1,27 @@
 [package]
-name = "vulkan-example-rs"
-version = "0.0.1"
-edition = "2021"
+authors = ["milkycopper <liuxiaonan@pku.edu.cn>"]
 build = "build.rs"
 description = "Vulkan examples writen in rust"
-license = "MIT"
-authors = ["milkycopper <liuxiaonan@pku.edu.cn>"]
-repository = "https://github.com/milkycopper/vulkan-examples-rs"
 documentation = "https://docs.rs/vulkan-examples-rs"
+edition = "2021"
+license = "MIT"
+name = "vulkan-example-rs"
 readme = "README.md"
-
-[features]
-default = ["vk_api_version_1_0", "vk_validation_layer"]
-
-vk_api_version_1_0 = []
-vk_api_version_1_1 = []
-vk_api_version_1_2 = []
-vk_api_version_1_3 = []
-vk_validation_layer = []
+repository = "https://github.com/milkycopper/vulkan-examples-rs"
+version = "0.0.1"
 
 [dependencies]
-ash = { version = "0.37.3", features = ["linked"] }
-ash-window = "0.12.0"
-winit = "0.28.0"
-env_logger = "0.10.0"
-raw-window-handle = "0.5.0"
-glam = "0.24.0"
-memoffset = "0.9.0"
 array-init = "2.1.0"
-image_loader = {package = "image", version = "0.24.7"}
+ash = {version = "0.37.3", features = ["linked"]}
+ash-window = "0.12.0"
 bytemuck = "1.14.0"
+env_logger = "0.10.0"
+glam = "0.24.0"
+image_loader = {package = "image", version = "0.24.7"}
+memoffset = "0.9.0"
+raw-window-handle = "0.5.0"
 tobj = "4.0.0"
+winit = "0.28.0"
 
 [build-dependencies]
 glob = "0.3.1"

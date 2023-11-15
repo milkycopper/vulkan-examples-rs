@@ -26,9 +26,9 @@ pub struct Surface {
 }
 
 impl Surface {
-    const DEFAULT_FORMAT: vk::Format = vk::Format::B8G8R8A8_SRGB;
+    pub const DEFAULT_FORMAT: vk::Format = vk::Format::B8G8R8A8_SRGB;
 
-    pub fn new(window: &Window, instance: Rc<Instance>) -> RenderResult<Self> {
+    pub fn new(window: &Window, instance: Rc<Instance>, format: vk::Format) -> RenderResult<Self> {
         let surface_khr = unsafe {
             ash_window::create_surface(
                 instance.entry(),
@@ -43,7 +43,7 @@ impl Surface {
         let attributes = RefCell::new(get_surface_attrs(
             &surface_khr,
             &loader,
-            Self::DEFAULT_FORMAT,
+            format,
             &physical_device.upgrade().unwrap(),
             window,
         )?);
@@ -77,7 +77,7 @@ impl Surface {
         *self.attributes.borrow_mut() = get_surface_attrs(
             &self.inner,
             &self.loader,
-            Self::DEFAULT_FORMAT,
+            self.format(),
             &self.physical_device.upgrade().unwrap(),
             window,
         )?;

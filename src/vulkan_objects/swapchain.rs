@@ -108,12 +108,6 @@ fn create_swapchain(
     surface: &Surface,
     family_indices: &Vec<u32>,
 ) -> VkResult<vk::SwapchainKHR> {
-    let sharing_mode = if family_indices.len() > 1 {
-        vk::SharingMode::CONCURRENT
-    } else {
-        vk::SharingMode::EXCLUSIVE
-    };
-
     let create_info = vk::SwapchainCreateInfoKHR::builder()
         .surface(*surface.surface_khr())
         .min_image_count(
@@ -128,7 +122,11 @@ fn create_swapchain(
         .image_extent(surface.extent())
         .image_array_layers(1)
         .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-        .image_sharing_mode(sharing_mode)
+        .image_sharing_mode(if family_indices.len() > 1 {
+            vk::SharingMode::CONCURRENT
+        } else {
+            vk::SharingMode::EXCLUSIVE
+        })
         .queue_family_indices(family_indices)
         .pre_transform(surface.attributes().capabilities.current_transform)
         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)

@@ -17,8 +17,8 @@ use vulkan_example_rs::{
     queue_family::QueueFamilyIndices,
     transforms::{Direction, MVPMatrix},
     vulkan_objects::{
-        extent_helper, format_helper, image_helper, renderpass_helper, Buffer, Device, ImageBuffer,
-        InstanceBuilder, QueueInfo, ShaderCreate, Surface, SwapChainBatch,
+        extent_helper, format_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder,
+        QueueInfo, ShaderCreate, Surface, SwapChainBatch, VulkanApiVersion,
     },
 };
 
@@ -242,10 +242,13 @@ impl VulkanObjects {
             InstanceBuilder::new(window)
                 .with_app_name_and_version(app_name, 0)
                 .with_engine_name_and_version(engine_name, 0)
+                .with_vulkan_api_version(VulkanApiVersion::V1_0)
+                .enable_validation_layer()
                 .build()
                 .unwrap(),
         );
-        let surface = Rc::new(Surface::new(window, instance.clone()).unwrap());
+        let surface =
+            Rc::new(Surface::new(window, instance.clone(), Surface::DEFAULT_FORMAT).unwrap());
         let queue_families = QueueFamilyIndices::from_surface(&surface).unwrap();
         let device = Rc::new(
             Device::new(
@@ -508,7 +511,7 @@ impl VulkanObjects {
 
             self.device.cmd_begin_render_pass(
                 command_buffer,
-                &renderpass_helper::create_renderpass_begin_info(
+                &helper::create_renderpass_begin_info(
                     &self.renderpass,
                     &frame_buffer,
                     self.surface.extent(),
@@ -689,15 +692,17 @@ mod helper {
         descriptor_set_layouts: &[vk::DescriptorSetLayout],
     ) -> (vk::PipelineLayout, vk::Pipeline) {
         let shader_creates = [
-            ShaderCreate::with_path(
+            ShaderCreate::with_spv_path(
                 "examples/shaders/triangle/shader.vert.spv",
                 vk::ShaderStageFlags::VERTEX,
+                ShaderCreate::DEFAULT_SHADER_START_NAME,
                 device.clone(),
             )
             .unwrap(),
-            ShaderCreate::with_path(
+            ShaderCreate::with_spv_path(
                 "examples/shaders/triangle/shader.frag.spv",
                 vk::ShaderStageFlags::FRAGMENT,
+                ShaderCreate::DEFAULT_SHADER_START_NAME,
                 device.clone(),
             )
             .unwrap(),
@@ -879,6 +884,36 @@ mod helper {
                 .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
                 .unwrap()
         }
+    }
+
+    pub(super) fn create_renderpass_begin_info(
+        render_pass: &vk::RenderPass,
+        frame_buffer: &vk::Framebuffer,
+        extent: vk::Extent2D,
+    ) -> vk::RenderPassBeginInfo {
+        vk::RenderPassBeginInfo::builder()
+            .render_pass(*render_pass)
+            .framebuffer(*frame_buffer)
+            .render_area(
+                vk::Rect2D::builder()
+                    .offset(vk::Offset2D { x: 0, y: 0 })
+                    .extent(extent)
+                    .build(),
+            )
+            .clear_values(&[
+                vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0., 0., 0., 1.],
+                    },
+                },
+                vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.,
+                        stencil: 0,
+                    },
+                },
+            ])
+            .build()
     }
 }
 

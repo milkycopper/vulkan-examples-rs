@@ -1,21 +1,34 @@
 use std::{
-    ffi::{c_char, CString},
+    borrow::Cow,
+    ffi::{c_char, CStr, CString},
     ops::Deref,
     rc::{Rc, Weak},
 };
 
-#[cfg(feature = "vk_validation_layer")]
-use std::borrow::Cow;
-#[cfg(feature = "vk_validation_layer")]
-use std::ffi::CStr;
-
-#[cfg(feature = "vk_validation_layer")]
-use ash::extensions::ext::DebugUtils;
-use ash::{vk, Entry};
+use ash::{extensions::ext::DebugUtils, vk, Entry};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::window::Window;
 
 use crate::error::{RenderError, RenderResult};
+
+#[derive(Clone, Copy, Debug)]
+pub enum VulkanApiVersion {
+    V1_0,
+    V1_1,
+    V1_2,
+    V1_3,
+}
+
+impl VulkanApiVersion {
+    fn get_u32_version(&self) -> u32 {
+        match self {
+            Self::V1_0 => vk::API_VERSION_1_0,
+            Self::V1_1 => vk::API_VERSION_1_1,
+            Self::V1_2 => vk::API_VERSION_1_2,
+            Self::V1_3 => vk::API_VERSION_1_3,
+        }
+    }
+}
 
 pub struct InstanceBuilder<'a> {
     window: &'a Window,
@@ -23,6 +36,8 @@ pub struct InstanceBuilder<'a> {
     engine_name: Option<&'a str>,
     app_version: u32,
     engine_version: u32,
+    vulkan_api_version: VulkanApiVersion,
+    validation_layer_enabled: bool,
 }
 
 impl<'a> InstanceBuilder<'a> {
@@ -33,6 +48,8 @@ impl<'a> InstanceBuilder<'a> {
             engine_name: None,
             app_version: 0,
             engine_version: 0,
+            vulkan_api_version: VulkanApiVersion::V1_0,
+            validation_layer_enabled: false,
         }
     }
 
@@ -48,26 +65,41 @@ impl<'a> InstanceBuilder<'a> {
         self
     }
 
+    pub fn with_vulkan_api_version(mut self, version: VulkanApiVersion) -> Self {
+        self.vulkan_api_version = version;
+        self
+    }
+
+    pub fn enable_validation_layer(mut self) -> Self {
+        self.validation_layer_enabled = true;
+        self
+    }
+
     pub fn build(&self) -> RenderResult<Instance> {
-        let extensions = [
-            ash_window::enumerate_required_extensions(self.window.raw_display_handle())?.to_vec(),
-            #[cfg(feature = "vk_validation_layer")]
-            vec![DebugUtils::name().as_ptr()],
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            vec![
-                vk::KhrPortabilityEnumerationFn::name().as_ptr(),
-                // Enabling this extension is a requirement when using `VK_KHR_portability_subset`
-                vk::KhrGetPhysicalDeviceProperties2Fn::name().as_ptr(),
-            ],
+        let mut extensions =
+            ash_window::enumerate_required_extensions(self.window.raw_display_handle())?.to_vec();
+
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        [
+            vk::KhrPortabilityEnumerationFn::name().as_ptr(),
+            // Enabling this extension is a requirement when using `VK_KHR_portability_subset`
+            vk::KhrGetPhysicalDeviceProperties2Fn::name().as_ptr(),
         ]
-        .concat();
+        .into_iter()
+        .for_each(|x| extensions.push(x));
+
+        if self.validation_layer_enabled {
+            extensions.push(DebugUtils::name().as_ptr())
+        }
 
         Instance::new(
-            self.app_name.unwrap_or(""),
+            self.app_name,
             self.app_version,
-            self.engine_name.unwrap_or(""),
+            self.engine_name,
             self.engine_version,
             &extensions,
+            self.validation_layer_enabled,
+            self.vulkan_api_version,
         )
     }
 }
@@ -76,41 +108,38 @@ pub struct Instance {
     inner: ash::Instance,
     entry: Entry,
     physical_devices: PhysicalDeviceCollection,
-    app_name_and_version: (String, u32),
-    engine_name_and_version: (String, u32),
-    #[cfg(feature = "vk_validation_layer")]
-    debug_utils: DebugUtils,
-    #[cfg(feature = "vk_validation_layer")]
-    debug_messenger: vk::DebugUtilsMessengerEXT,
+    app_name_and_version: Option<(String, u32)>,
+    engine_name_and_version: Option<(String, u32)>,
+    debug_worker: Option<(DebugUtils, vk::DebugUtilsMessengerEXT)>,
+    vulkan_api_version: VulkanApiVersion,
 }
 
 impl Instance {
     fn new(
-        application_name: &str,
+        application_name: Option<&str>,
         application_version: u32,
-        engine_name: &str,
+        engine_name: Option<&str>,
         engine_version: u32,
         enabled_extensions: &[*const c_char],
+        validation_layer_enabled: bool,
+        vulkan_api_version: VulkanApiVersion,
     ) -> RenderResult<Self> {
         let entry = Entry::linked();
 
         let app_info = vk::ApplicationInfo::builder()
-            .application_name(&CString::new(application_name).unwrap())
+            .application_name(&CString::new(application_name.unwrap_or("")).unwrap())
             .application_version(application_version)
-            .engine_name(&CString::new(engine_name).unwrap())
+            .engine_name(&CString::new(engine_name.unwrap_or("No Engine")).unwrap())
             .engine_version(engine_version)
-            .api_version(super::VULKAN_API_VERSION)
+            .api_version(vulkan_api_version.get_u32_version())
             .build();
 
-        #[cfg(feature = "vk_validation_layer")]
-        let layer_names: [*const c_char; 1] = unsafe {
-            [CStr::from_bytes_with_nul_unchecked(
-                b"VK_LAYER_KHRONOS_validation\0",
-            )]
-            .map(|raw_name| raw_name.as_ptr())
+        let mut layer_names = vec![];
+        if validation_layer_enabled {
+            layer_names.push(unsafe {
+                CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()
+            })
         };
-        #[cfg(not(feature = "vk_validation_layer"))]
-        let layer_names: [*const c_char; 0] = [];
 
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         let create_flags = vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
@@ -126,8 +155,7 @@ impl Instance {
 
         let vk_instance = unsafe { entry.create_instance(&instance_create_info, None)? };
 
-        #[cfg(feature = "vk_validation_layer")]
-        let (debug_utils, debug_messenger) = {
+        let debug_worker = if validation_layer_enabled {
             let debug_utils_loader = DebugUtils::new(&entry, &vk_instance);
             let messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
                 .message_severity(
@@ -145,7 +173,9 @@ impl Instance {
             let debug_messenger = unsafe {
                 debug_utils_loader.create_debug_utils_messenger(&messenger_create_info, None)?
             };
-            (debug_utils_loader, debug_messenger)
+            Some((debug_utils_loader, debug_messenger))
+        } else {
+            None
         };
 
         let physical_devices = {
@@ -173,13 +203,12 @@ impl Instance {
         Ok(Instance {
             inner: vk_instance,
             entry,
-            #[cfg(feature = "vk_validation_layer")]
-            debug_utils,
-            #[cfg(feature = "vk_validation_layer")]
-            debug_messenger,
+            debug_worker,
             physical_devices,
-            app_name_and_version: (application_name.to_string(), application_version),
-            engine_name_and_version: (engine_name.to_string(), engine_version),
+            app_name_and_version: application_name
+                .map(|name| (name.to_string(), application_version)),
+            engine_name_and_version: engine_name.map(|name| (name.to_string(), engine_version)),
+            vulkan_api_version,
         })
     }
 
@@ -191,12 +220,20 @@ impl Instance {
         Rc::downgrade(&self.physical_devices.pick_first().unwrap())
     }
 
-    pub fn app_name_and_version(&self) -> (String, u32) {
-        self.app_name_and_version.clone()
+    pub fn app_name_and_version(&self) -> &Option<(String, u32)> {
+        &self.app_name_and_version
     }
 
-    pub fn engine_name_and_version(&self) -> (String, u32) {
-        self.engine_name_and_version.clone()
+    pub fn engine_name_and_version(&self) -> &Option<(String, u32)> {
+        &self.engine_name_and_version
+    }
+
+    pub fn validation_layer_enabled(&self) -> bool {
+        self.debug_worker.is_some()
+    }
+
+    pub fn vulkan_api_version(&self) -> VulkanApiVersion {
+        self.vulkan_api_version
     }
 }
 
@@ -211,15 +248,14 @@ impl Drop for Instance {
     fn drop(&mut self) {
         unsafe {
             self.physical_devices.check_can_be_freed();
-            #[cfg(feature = "vk_validation_layer")]
-            self.debug_utils
-                .destroy_debug_utils_messenger(self.debug_messenger, None);
+            if let Some((debug_utils, debug_messenger)) = self.debug_worker.as_ref() {
+                debug_utils.destroy_debug_utils_messenger(*debug_messenger, None)
+            }
             self.destroy_instance(None);
         }
     }
 }
 
-#[cfg(feature = "vk_validation_layer")]
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
