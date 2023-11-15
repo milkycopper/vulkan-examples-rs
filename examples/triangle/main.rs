@@ -12,13 +12,13 @@ use winit::{
 use vulkan_example_rs::{
     app::WindowApp,
     camera::Camera,
-    error::RenderResult,
     mesh::Vertex,
     queue_family::QueueFamilyIndices,
     transforms::{Direction, MVPMatrix},
     vulkan_objects::{
-        extent_helper, format_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder,
-        QueueInfo, ShaderCreate, Surface, SwapChainBatch, VulkanApiVersion,
+        extent_helper, format_helper, image_helper, Buffer, DepthStencilImageAndView, Device,
+        ImageBuffer, InstanceBuilder, QueueInfo, ShaderCreate, Surface, SwapChainBatch,
+        VulkanApiVersion,
     },
 };
 
@@ -53,12 +53,9 @@ impl WindowApp for DrawTriangleApp {
                 )
                 .unwrap();
 
-            let result = vk_objs.swapchain_batch.loader().acquire_next_image(
-                *vk_objs.swapchain_batch.swapchain_khr(),
-                u64::MAX,
-                vk_objs.image_available_semaphores[self.current_frame],
-                vk::Fence::null(),
-            );
+            let result = vk_objs
+                .swapchain_batch
+                .acquire_next_image(vk_objs.image_available_semaphores[self.current_frame]);
 
             match result {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
@@ -103,16 +100,11 @@ impl WindowApp for DrawTriangleApp {
                 )
                 .unwrap();
 
-            let present_info_khr = vk::PresentInfoKHR::builder()
-                .wait_semaphores(&[vk_objs.render_finished_semaphores[self.current_frame]])
-                .swapchains(&[*vk_objs.swapchain_batch.swapchain_khr()])
-                .image_indices(&[image_index])
-                .build();
-
-            let result = vk_objs
-                .swapchain_batch
-                .loader()
-                .queue_present(vk_objs.present_queue, &present_info_khr);
+            let result = vk_objs.swapchain_batch.queue_present(
+                image_index,
+                &[vk_objs.render_finished_semaphores[self.current_frame]],
+                &vk_objs.present_queue,
+            );
 
             let need_recreate = match result {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => true,
@@ -226,8 +218,7 @@ struct VulkanObjects {
     texture_image: ImageBuffer,
     texture_image_view: vk::ImageView,
     texture_image_sampler: vk::Sampler,
-    depth_buffer: ImageBuffer,
-    depth_image_view: vk::ImageView,
+    depth_image_and_view: DepthStencilImageAndView,
 }
 
 impl VulkanObjects {
@@ -393,15 +384,19 @@ impl VulkanObjects {
             .create_image_view(vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)
             .unwrap();
 
-        let (depth_buffer, depth_image_view) =
-            helper::create_depth_buffer_and_image_view(surface.extent(), device.clone()).unwrap();
+        let depth_image_and_view = DepthStencilImageAndView::new(
+            surface.extent(),
+            format_helper::find_depth_format(&device).unwrap(),
+            device.clone(),
+        )
+        .unwrap();
 
         let framebuffers = helper::create_swapchain_frame_buffer(
             &swapchain_batch,
             &renderpass,
             surface.extent(),
             &device,
-            &depth_image_view,
+            depth_image_and_view.image_view(),
         );
 
         {
@@ -465,8 +460,7 @@ impl VulkanObjects {
             texture_image,
             texture_image_view,
             texture_image_sampler,
-            depth_buffer,
-            depth_image_view,
+            depth_image_and_view,
         }
     }
 
@@ -572,20 +566,14 @@ impl VulkanObjects {
             self.device.device_wait_idle().unwrap();
 
             self.surface.refit_surface_attribute(window).unwrap();
-            self.recreate_depth_buffer_and_image_view();
-            self.swapchain_batch.recreate().unwrap();
-            self.recreate_swapchain_framebuffers();
-        }
-    }
-
-    pub fn recreate_depth_buffer_and_image_view(&mut self) {
-        unsafe {
-            self.device.destroy_image_view(self.depth_image_view, None);
-            (self.depth_buffer, self.depth_image_view) = helper::create_depth_buffer_and_image_view(
+            self.depth_image_and_view = DepthStencilImageAndView::new(
                 self.surface.extent(),
+                self.depth_image_and_view.format(),
                 self.device.clone(),
             )
-            .unwrap()
+            .unwrap();
+            self.swapchain_batch.recreate().unwrap();
+            self.recreate_swapchain_framebuffers();
         }
     }
 
@@ -599,7 +587,7 @@ impl VulkanObjects {
                 &self.renderpass,
                 self.surface.extent(),
                 &self.device,
-                &self.depth_image_view,
+                self.depth_image_and_view.image_view(),
             )
         }
     }
@@ -618,9 +606,8 @@ impl Drop for VulkanObjects {
             self.in_flight_fences
                 .into_iter()
                 .for_each(|fence| self.device.destroy_fence(fence, None));
-            [self.texture_image_view, self.depth_image_view]
-                .into_iter()
-                .for_each(|image_view| self.device.destroy_image_view(image_view, None));
+            self.device
+                .destroy_image_view(self.texture_image_view, None);
             self.device
                 .destroy_sampler(self.texture_image_sampler, None);
             self.device.destroy_command_pool(self.command_pool, None);
@@ -641,22 +628,6 @@ impl Drop for VulkanObjects {
 
 mod helper {
     use super::*;
-
-    pub(super) fn create_depth_buffer_and_image_view(
-        extent: vk::Extent2D,
-        device: Rc<Device>,
-    ) -> RenderResult<(ImageBuffer, vk::ImageView)> {
-        let depth_buffer = ImageBuffer::create_depth_buffer(extent, device.clone())?;
-
-        let depth_image_view = image_helper::create_image_view(
-            depth_buffer.vk_image(),
-            depth_buffer.format(),
-            vk::ImageAspectFlags::DEPTH,
-            &device,
-        )?;
-
-        Ok((depth_buffer, depth_image_view))
-    }
 
     pub(super) fn create_swapchain_frame_buffer(
         swapchain_batch: &SwapChainBatch,

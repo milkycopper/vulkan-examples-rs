@@ -23,4 +23,4 @@ mod buffer;
 pub use buffer::{memory_helper, Buffer};
 
 mod image;
-pub use image::{format_helper, image_helper, ImageBuffer};
+pub use image::{format_helper, image_helper, DepthStencilImageAndView, ImageBuffer};

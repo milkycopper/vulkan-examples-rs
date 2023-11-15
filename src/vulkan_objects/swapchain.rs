@@ -42,13 +42,30 @@ impl SwapChainBatch {
         Ok(())
     }
 
-    fn dispose_gpu_resources(&self) {
+    pub fn acquire_next_image(&self, signal_semaphore: vk::Semaphore) -> VkResult<(u32, bool)> {
         unsafe {
-            self.image_views
-                .iter()
-                .for_each(|view| self.device.destroy_image_view(*view, None));
-            self.loader.destroy_swapchain(self.swapchain, None);
-        };
+            self.loader.acquire_next_image(
+                self.swapchain,
+                u64::MAX,
+                signal_semaphore,
+                vk::Fence::null(),
+            )
+        }
+    }
+
+    pub fn queue_present(
+        &self,
+        image_index: u32,
+        wait_semaphores: &[vk::Semaphore],
+        queue: &vk::Queue,
+    ) -> VkResult<bool> {
+        let present_info_khr = vk::PresentInfoKHR::builder()
+            .wait_semaphores(wait_semaphores)
+            .swapchains(&[self.swapchain])
+            .image_indices(&[image_index])
+            .build();
+
+        unsafe { self.loader.queue_present(*queue, &present_info_khr) }
     }
 
     pub fn loader(&self) -> &SwapChainLoader {
@@ -65,6 +82,15 @@ impl SwapChainBatch {
 
     pub fn image_views(&self) -> &Vec<vk::ImageView> {
         &self.image_views
+    }
+
+    fn dispose_gpu_resources(&self) {
+        unsafe {
+            self.image_views
+                .iter()
+                .for_each(|view| self.device.destroy_image_view(*view, None));
+            self.loader.destroy_swapchain(self.swapchain, None);
+        };
     }
 }
 

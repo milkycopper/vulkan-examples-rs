@@ -253,18 +253,6 @@ impl ImageBuffer {
 
         Ok(image_buffer)
     }
-
-    pub fn create_depth_buffer(extent: vk::Extent2D, device: Rc<Device>) -> RenderResult<Self> {
-        Self::new(
-            extent.width,
-            extent.height,
-            format_helper::find_depth_format(&device)?,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            device,
-        )
-    }
 }
 
 impl Drop for ImageBuffer {
@@ -273,6 +261,55 @@ impl Drop for ImageBuffer {
             self.device.destroy_image(self.image, None);
             self.device.free_memory(self.device_momory, None)
         }
+    }
+}
+
+pub struct DepthStencilImageAndView {
+    buffer: ImageBuffer,
+    image_view: vk::ImageView,
+    device: Rc<Device>,
+}
+
+impl DepthStencilImageAndView {
+    pub fn new(extent: vk::Extent2D, format: vk::Format, device: Rc<Device>) -> RenderResult<Self> {
+        let buffer = ImageBuffer::new(
+            extent.width,
+            extent.height,
+            format,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            device.clone(),
+        )?;
+        let image_view = image_helper::create_image_view(
+            buffer.vk_image(),
+            format,
+            vk::ImageAspectFlags::DEPTH,
+            &device,
+        )?;
+        Ok(Self {
+            buffer,
+            image_view,
+            device,
+        })
+    }
+
+    pub fn buffer(&self) -> &ImageBuffer {
+        &self.buffer
+    }
+
+    pub fn image_view(&self) -> &vk::ImageView {
+        &self.image_view
+    }
+
+    pub fn format(&self) -> vk::Format {
+        self.buffer.format
+    }
+}
+
+impl Drop for DepthStencilImageAndView {
+    fn drop(&mut self) {
+        unsafe { self.device.destroy_image_view(self.image_view, None) }
     }
 }
 
