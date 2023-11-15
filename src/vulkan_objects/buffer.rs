@@ -68,11 +68,11 @@ impl<T> Buffer<T> {
         self.size_in_bytes
     }
 
-    pub fn vk_buffer(&self) -> vk::Buffer {
+    pub fn buffer(&self) -> vk::Buffer {
         self.buffer
     }
 
-    pub fn vk_device_momory(&self) -> vk::DeviceMemory {
+    pub fn device_momory(&self) -> vk::DeviceMemory {
         self.device_momory
     }
 
@@ -132,13 +132,13 @@ impl<T> Buffer<T> {
 
         unsafe {
             let data_ptr = device.map_memory(
-                staging_buffer.vk_device_momory(),
+                staging_buffer.device_momory(),
                 0,
                 staging_buffer.size_in_bytes(),
                 vk::MemoryMapFlags::default(),
             )?;
             std::ptr::copy_nonoverlapping(indice_data.as_ptr(), data_ptr as *mut T, indice_num);
-            device.unmap_memory(staging_buffer.vk_device_momory());
+            device.unmap_memory(staging_buffer.device_momory());
         }
 
         staging_buffer.copy_to(&indice_buffer, command_pool, queue)?;

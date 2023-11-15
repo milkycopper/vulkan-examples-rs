@@ -187,7 +187,7 @@ impl ImageBuffer {
 
             unsafe {
                 let data_ptr = device.map_memory(
-                    buffer.vk_device_momory(),
+                    buffer.device_momory(),
                     0,
                     buffer.size_in_bytes(),
                     vk::MemoryMapFlags::default(),
@@ -197,7 +197,7 @@ impl ImageBuffer {
                     data_ptr as *mut u8,
                     size,
                 );
-                device.unmap_memory(buffer.vk_device_momory());
+                device.unmap_memory(buffer.device_momory());
             };
             buffer
         };
@@ -233,7 +233,7 @@ impl ImageBuffer {
             |command| unsafe {
                 device.cmd_copy_buffer_to_image(
                     *command.vk_command_buffer(),
-                    staging_buffer.vk_buffer(),
+                    staging_buffer.buffer(),
                     image_buffer.image,
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     &[image_copy],

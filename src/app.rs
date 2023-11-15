@@ -68,3 +68,6 @@ pub trait WindowApp {
             });
     }
 }
+
+mod fixed_stuff;
+pub use fixed_stuff::FixedVulkanStuff;

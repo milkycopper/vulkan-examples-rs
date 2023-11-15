@@ -11,6 +11,7 @@ pub enum RenderError {
     FormatNotSupported(String),
     MemoryTypeNotSupported(String),
     LayoutTransitionNotSupported(String),
+    QueueFamilyNotSupported(String),
 }
 
 impl From<ash::vk::Result> for RenderError {
@@ -56,6 +57,9 @@ impl Display for RenderError {
             Self::MemoryTypeNotSupported(s) => write!(f, "MEMORY TYPE NOT SUPPORTED: {s}"),
             Self::LayoutTransitionNotSupported(s) => {
                 write!(f, "LAYOUT TRANSITION NOT SUPPORTED: {s}")
+            }
+            Self::QueueFamilyNotSupported(s) => {
+                write!(f, "QUEUE FAMILY NOT SUPPORTED: {s}")
             }
         }
     }

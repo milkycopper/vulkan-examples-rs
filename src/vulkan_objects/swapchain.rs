@@ -138,10 +138,9 @@ fn create_swapchain(
         .surface(*surface.surface_khr())
         .min_image_count(
             surface
-                .attributes()
-                .capabilities
+                .capabilities()
                 .max_image_count
-                .min(surface.attributes().capabilities.min_image_count + 1),
+                .min(surface.capabilities().min_image_count + 1),
         )
         .image_format(surface.format())
         .image_color_space(surface.color_space())
@@ -154,9 +153,9 @@ fn create_swapchain(
             vk::SharingMode::EXCLUSIVE
         })
         .queue_family_indices(family_indices)
-        .pre_transform(surface.attributes().capabilities.current_transform)
+        .pre_transform(surface.capabilities().current_transform)
         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-        .present_mode(surface.attributes().present_mode)
+        .present_mode(surface.present_mode())
         .clipped(false)
         .old_swapchain(vk::SwapchainKHR::null())
         .build();

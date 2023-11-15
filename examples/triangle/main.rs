@@ -10,19 +10,15 @@ use winit::{
 };
 
 use vulkan_example_rs::{
-    app::WindowApp,
+    app::{FixedVulkanStuff, WindowApp},
     camera::Camera,
     mesh::Vertex,
-    queue_family::QueueFamilyIndices,
     transforms::{Direction, MVPMatrix},
     vulkan_objects::{
-        extent_helper, format_helper, image_helper, Buffer, DepthStencilImageAndView, Device,
-        ImageBuffer, InstanceBuilder, QueueInfo, ShaderCreate, Surface, SwapChainBatch,
+        extent_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder, ShaderCreate,
         VulkanApiVersion,
     },
 };
-
-const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 struct DrawTriangleApp {
     window: Window,
@@ -45,21 +41,28 @@ impl WindowApp for DrawTriangleApp {
             let vk_objs = &mut self.vulkan_objs;
 
             vk_objs
+                .fixed_vulkan_stuff
                 .device
                 .wait_for_fences(
-                    &[vk_objs.in_flight_fences[self.current_frame]],
+                    &[vk_objs.fixed_vulkan_stuff.in_flight_fences[self.current_frame]],
                     true,
                     u64::MAX,
                 )
                 .unwrap();
 
             let result = vk_objs
+                .fixed_vulkan_stuff
                 .swapchain_batch
-                .acquire_next_image(vk_objs.image_available_semaphores[self.current_frame]);
+                .acquire_next_image(
+                    vk_objs.fixed_vulkan_stuff.image_available_semaphores[self.current_frame],
+                );
 
             match result {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    vk_objs.recreate_swapchain(&self.window);
+                    vk_objs
+                        .fixed_vulkan_stuff
+                        .recreate_swapchain(&self.window)
+                        .unwrap();
                     return;
                 }
                 Ok(_) => {}
@@ -72,38 +75,44 @@ impl WindowApp for DrawTriangleApp {
                 .update_uniform_buffer(&self.camera, &vk_objs.uniform_buffers[self.current_frame]);
 
             vk_objs
+                .fixed_vulkan_stuff
                 .device
-                .reset_fences(&[vk_objs.in_flight_fences[self.current_frame]])
+                .reset_fences(&[vk_objs.fixed_vulkan_stuff.in_flight_fences[self.current_frame]])
                 .unwrap();
 
             vk_objs.record_render_commands(
-                vk_objs.command_buffers[self.current_frame],
-                vk_objs.swapchain_framebuffers[image_index as usize],
+                vk_objs.fixed_vulkan_stuff.command_buffers[self.current_frame],
+                vk_objs.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
                 vk_objs.descriptor_sets[self.current_frame],
                 self.model_vertices.len() as u32,
                 self.model_indices.len() as u32,
             );
 
             let submit_info = vk::SubmitInfo::builder()
-                .wait_semaphores(&[vk_objs.image_available_semaphores[self.current_frame]])
+                .wait_semaphores(&[
+                    vk_objs.fixed_vulkan_stuff.image_available_semaphores[self.current_frame]
+                ])
                 .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-                .command_buffers(&[vk_objs.command_buffers[self.current_frame]])
-                .signal_semaphores(&[vk_objs.render_finished_semaphores[self.current_frame]])
+                .command_buffers(&[vk_objs.fixed_vulkan_stuff.command_buffers[self.current_frame]])
+                .signal_semaphores(&[
+                    vk_objs.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]
+                ])
                 .build();
 
             vk_objs
+                .fixed_vulkan_stuff
                 .device
                 .queue_submit(
-                    vk_objs.graphic_queue,
+                    vk_objs.fixed_vulkan_stuff.device.graphic_queue(),
                     &[submit_info],
-                    vk_objs.in_flight_fences[self.current_frame],
+                    vk_objs.fixed_vulkan_stuff.in_flight_fences[self.current_frame],
                 )
                 .unwrap();
 
-            let result = vk_objs.swapchain_batch.queue_present(
+            let result = vk_objs.fixed_vulkan_stuff.swapchain_batch.queue_present(
                 image_index,
-                &[vk_objs.render_finished_semaphores[self.current_frame]],
-                &vk_objs.present_queue,
+                &[vk_objs.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]],
+                &vk_objs.fixed_vulkan_stuff.device.graphic_queue(),
             );
 
             let need_recreate = match result {
@@ -113,11 +122,14 @@ impl WindowApp for DrawTriangleApp {
             };
             if need_recreate || self.window_resized {
                 self.window_resized = false;
-                vk_objs.recreate_swapchain(&self.window);
+                vk_objs
+                    .fixed_vulkan_stuff
+                    .recreate_swapchain(&self.window)
+                    .unwrap();
             }
         };
 
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
         self.last_time = SystemTime::now();
     }
 
@@ -189,36 +201,30 @@ impl WindowApp for DrawTriangleApp {
     fn run(&mut self, event_loop: &mut RefCell<EventLoop<()>>) {
         env_logger::init();
         self.render_loop(event_loop);
-        unsafe { self.vulkan_objs.device.device_wait_idle().unwrap() };
+        unsafe {
+            self.vulkan_objs
+                .fixed_vulkan_stuff
+                .device
+                .device_wait_idle()
+                .unwrap()
+        };
     }
 }
 
 struct VulkanObjects {
-    surface: Rc<Surface>,
-    device: Rc<Device>,
-    graphic_queue: vk::Queue,
-    present_queue: vk::Queue,
-    swapchain_batch: SwapChainBatch,
+    fixed_vulkan_stuff: FixedVulkanStuff,
     descriptor_set_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: [vk::DescriptorSet; 2],
     pipeline_layout: vk::PipelineLayout,
-    renderpass: vk::RenderPass,
     pipeline: vk::Pipeline,
-    swapchain_framebuffers: Vec<vk::Framebuffer>,
-    command_pool: vk::CommandPool,
-    command_buffers: [vk::CommandBuffer; MAX_FRAMES_IN_FLIGHT],
-    image_available_semaphores: [vk::Semaphore; MAX_FRAMES_IN_FLIGHT],
-    render_finished_semaphores: [vk::Semaphore; MAX_FRAMES_IN_FLIGHT],
-    in_flight_fences: [vk::Fence; MAX_FRAMES_IN_FLIGHT],
     vertex_buffer: Buffer<Vertex>,
     indice_buffer: Buffer<u32>,
-    uniform_buffers: [(Buffer<MVPMatrix>, *mut c_void); MAX_FRAMES_IN_FLIGHT],
+    uniform_buffers: [(Buffer<MVPMatrix>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
     #[allow(dead_code)]
     texture_image: ImageBuffer,
     texture_image_view: vk::ImageView,
     texture_image_sampler: vk::Sampler,
-    depth_image_and_view: DepthStencilImageAndView,
 }
 
 impl VulkanObjects {
@@ -238,36 +244,10 @@ impl VulkanObjects {
                 .build()
                 .unwrap(),
         );
-        let surface =
-            Rc::new(Surface::new(window, instance.clone(), Surface::DEFAULT_FORMAT).unwrap());
-        let queue_families = QueueFamilyIndices::from_surface(&surface).unwrap();
-        let device = Rc::new(
-            Device::new(
-                instance,
-                queue_families
-                    .merge()
-                    .unwrap()
-                    .iter()
-                    .map(|i| QueueInfo {
-                        index: *i,
-                        priority: 1.0,
-                    })
-                    .collect(),
-            )
-            .unwrap(),
-        );
-        let graphic_queue =
-            unsafe { device.get_device_queue(queue_families.graphic_family.unwrap(), 0) };
-        let present_queue =
-            unsafe { device.get_device_queue(queue_families.present_family.unwrap(), 0) };
-        let swapchain_batch = SwapChainBatch::new(surface.clone(), device.clone()).unwrap();
+        let fixed_vulkan_stuff = FixedVulkanStuff::new(window, instance).unwrap();
 
-        let renderpass = helper::create_renderpass(
-            surface.format(),
-            format_helper::find_depth_format(&device).unwrap(),
-            &device,
-        );
-        let descriptor_set_layout = helper::create_descriptor_set_layout(&device);
+        let descriptor_set_layout =
+            helper::create_descriptor_set_layout(&fixed_vulkan_stuff.device);
 
         let descriptor_pool = unsafe {
             let create_info = vk::DescriptorPoolCreateInfo::builder()
@@ -279,21 +259,25 @@ impl VulkanObjects {
                     .map(|ty| {
                         vk::DescriptorPoolSize::builder()
                             .ty(ty)
-                            .descriptor_count(MAX_FRAMES_IN_FLIGHT as u32)
+                            .descriptor_count(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
                             .build()
                     }),
                 )
-                .max_sets(MAX_FRAMES_IN_FLIGHT as u32)
+                .max_sets(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
                 .build();
-            device.create_descriptor_pool(&create_info, None).unwrap()
+            fixed_vulkan_stuff
+                .device
+                .create_descriptor_pool(&create_info, None)
+                .unwrap()
         };
 
-        let descriptor_sets: [vk::DescriptorSet; MAX_FRAMES_IN_FLIGHT] = unsafe {
+        let descriptor_sets: [vk::DescriptorSet; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] = unsafe {
             let allocate_info = vk::DescriptorSetAllocateInfo::builder()
                 .descriptor_pool(descriptor_pool)
-                .set_layouts(&[descriptor_set_layout; MAX_FRAMES_IN_FLIGHT])
+                .set_layouts(&[descriptor_set_layout; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT])
                 .build();
-            device
+            fixed_vulkan_stuff
+                .device
                 .allocate_descriptor_sets(&allocate_info)
                 .unwrap()
                 .try_into()
@@ -301,108 +285,53 @@ impl VulkanObjects {
         };
 
         let (pipeline_layout, pipeline) = helper::create_pipeline(
-            device.clone(),
-            surface.extent(),
-            &renderpass,
+            fixed_vulkan_stuff.device.clone(),
+            fixed_vulkan_stuff.surface.extent(),
+            &fixed_vulkan_stuff.render_pass,
             &[descriptor_set_layout],
         );
 
-        let command_pool = {
-            let create_info = vk::CommandPoolCreateInfo::builder()
-                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                .queue_family_index(queue_families.graphic_family.unwrap())
-                .build();
-            unsafe {
-                device
-                    .create_command_pool(&create_info, None)
-                    .expect("Fail to create command pool")
-            }
-        };
+        let vertex_buffer = Vertex::create_buffer(
+            vertices,
+            fixed_vulkan_stuff.device.clone(),
+            &fixed_vulkan_stuff.command_pool,
+            &fixed_vulkan_stuff.device.graphic_queue(),
+        )
+        .unwrap();
 
-        let command_buffers: [_; MAX_FRAMES_IN_FLIGHT] = {
-            let allocate_info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32)
-                .build();
-            unsafe {
-                device
-                    .allocate_command_buffers(&allocate_info)
-                    .expect("Fail to alloc command buffer")
-                    .try_into()
-                    .unwrap()
-            }
-        };
+        let indice_buffer = Buffer::new_indice_buffer(
+            indices,
+            fixed_vulkan_stuff.device.clone(),
+            &fixed_vulkan_stuff.command_pool,
+            &fixed_vulkan_stuff.device.graphic_queue(),
+        )
+        .unwrap();
 
-        let image_available_semaphores: [_; MAX_FRAMES_IN_FLIGHT] =
-            array_init::array_init(|_| unsafe {
-                device
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-                    .unwrap()
+        let uniform_buffers: [_; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
+            array_init::array_init(|_| {
+                let buffer =
+                    MVPMatrix::empty_uniform_buffer(fixed_vulkan_stuff.device.clone()).unwrap();
+                let ptr = buffer.uniform_mapped_ptr().unwrap();
+                (buffer, ptr)
             });
-
-        let render_finished_semaphores: [_; MAX_FRAMES_IN_FLIGHT] =
-            array_init::array_init(|_| unsafe {
-                device
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-                    .unwrap()
-            });
-
-        let in_flight_fences: [_; MAX_FRAMES_IN_FLIGHT] = array_init::array_init(|_| unsafe {
-            device
-                .create_fence(
-                    &vk::FenceCreateInfo::builder()
-                        .flags(vk::FenceCreateFlags::SIGNALED)
-                        .build(),
-                    None,
-                )
-                .unwrap()
-        });
-
-        let vertex_buffer =
-            Vertex::create_buffer(vertices, device.clone(), &command_pool, &graphic_queue).unwrap();
-
-        let indice_buffer =
-            Buffer::new_indice_buffer(indices, device.clone(), &command_pool, &graphic_queue)
-                .unwrap();
-
-        let uniform_buffers: [_; MAX_FRAMES_IN_FLIGHT] = array_init::array_init(|_| {
-            let buffer = MVPMatrix::empty_uniform_buffer(device.clone()).unwrap();
-            let ptr = buffer.uniform_mapped_ptr().unwrap();
-            (buffer, ptr)
-        });
 
         let texture_image = ImageBuffer::color_image_from_file(
             "examples/textures/triangle/viking_room.png",
-            device.clone(),
-            &command_pool,
-            &graphic_queue,
+            fixed_vulkan_stuff.device.clone(),
+            &fixed_vulkan_stuff.command_pool,
+            &fixed_vulkan_stuff.device.graphic_queue(),
         )
         .unwrap();
-        let texture_image_sampler = image_helper::create_texture_sampler(&device).unwrap();
+        let texture_image_sampler =
+            image_helper::create_texture_sampler(&fixed_vulkan_stuff.device).unwrap();
         let texture_image_view = texture_image
             .create_image_view(vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)
             .unwrap();
 
-        let depth_image_and_view = DepthStencilImageAndView::new(
-            surface.extent(),
-            format_helper::find_depth_format(&device).unwrap(),
-            device.clone(),
-        )
-        .unwrap();
-
-        let framebuffers = helper::create_swapchain_frame_buffer(
-            &swapchain_batch,
-            &renderpass,
-            surface.extent(),
-            &device,
-            depth_image_and_view.image_view(),
-        );
-
         {
-            for i in 0..MAX_FRAMES_IN_FLIGHT {
+            for i in 0..FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT {
                 let uniform_buffer_info = vk::DescriptorBufferInfo::builder()
-                    .buffer(uniform_buffers[i].0.vk_buffer())
+                    .buffer(uniform_buffers[i].0.buffer())
                     .offset(0)
                     .range(std::mem::size_of::<MVPMatrix>() as u64)
                     .build();
@@ -428,7 +357,7 @@ impl VulkanObjects {
                     .build();
 
                 unsafe {
-                    device.update_descriptor_sets(
+                    fixed_vulkan_stuff.device.update_descriptor_sets(
                         &[uniform_descritptor_write, image_descritptor_write],
                         &[],
                     )
@@ -437,30 +366,18 @@ impl VulkanObjects {
         }
 
         VulkanObjects {
-            device,
-            graphic_queue,
-            present_queue,
-            surface,
-            swapchain_batch,
-            renderpass,
+            fixed_vulkan_stuff,
             descriptor_set_layout,
             descriptor_pool,
             descriptor_sets,
             pipeline_layout,
             pipeline,
-            swapchain_framebuffers: framebuffers,
-            command_pool,
-            command_buffers,
-            image_available_semaphores,
-            render_finished_semaphores,
-            in_flight_fences,
             vertex_buffer,
             indice_buffer,
             uniform_buffers,
             texture_image,
             texture_image_view,
             texture_image_sampler,
-            depth_image_and_view,
         }
     }
 
@@ -495,56 +412,62 @@ impl VulkanObjects {
         indice_num: u32,
     ) {
         unsafe {
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::default())
                 .expect("Fail to reset command buffer");
 
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::default())
                 .expect("Fail to begin command buffer");
 
-            self.device.cmd_begin_render_pass(
+            self.fixed_vulkan_stuff.device.cmd_begin_render_pass(
                 command_buffer,
                 &helper::create_renderpass_begin_info(
-                    &self.renderpass,
+                    &self.fixed_vulkan_stuff.render_pass,
                     &frame_buffer,
-                    self.surface.extent(),
+                    self.fixed_vulkan_stuff.surface.extent(),
                 ),
                 vk::SubpassContents::INLINE,
             );
 
-            self.device.cmd_bind_pipeline(
+            self.fixed_vulkan_stuff.device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline,
             );
 
-            self.device.cmd_bind_vertex_buffers(
+            self.fixed_vulkan_stuff.device.cmd_bind_vertex_buffers(
                 command_buffer,
                 0,
-                &[self.vertex_buffer.vk_buffer()],
+                &[self.vertex_buffer.buffer()],
                 &[0],
             );
-            self.device.cmd_bind_index_buffer(
+            self.fixed_vulkan_stuff.device.cmd_bind_index_buffer(
                 command_buffer,
-                self.indice_buffer.vk_buffer(),
+                self.indice_buffer.buffer(),
                 0,
                 vk::IndexType::UINT32,
             );
 
-            self.device.cmd_set_viewport(
+            self.fixed_vulkan_stuff.device.cmd_set_viewport(
                 command_buffer,
                 0,
-                &[extent_helper::viewport_from_extent(self.surface.extent())],
+                &[extent_helper::viewport_from_extent(
+                    self.fixed_vulkan_stuff.surface.extent(),
+                )],
             );
 
-            self.device.cmd_set_scissor(
+            self.fixed_vulkan_stuff.device.cmd_set_scissor(
                 command_buffer,
                 0,
-                &[extent_helper::scissor_from_extent(self.surface.extent())],
+                &[extent_helper::scissor_from_extent(
+                    self.fixed_vulkan_stuff.surface.extent(),
+                )],
             );
 
-            self.device.cmd_bind_descriptor_sets(
+            self.fixed_vulkan_stuff.device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
@@ -553,42 +476,17 @@ impl VulkanObjects {
                 &[],
             );
 
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .cmd_draw_indexed(command_buffer, indice_num, 1, 0, 0, 0);
 
-            self.device.cmd_end_render_pass(command_buffer);
-            self.device.end_command_buffer(command_buffer).unwrap();
-        }
-    }
-
-    pub fn recreate_swapchain(&mut self, window: &Window) {
-        unsafe {
-            self.device.device_wait_idle().unwrap();
-
-            self.surface.refit_surface_attribute(window).unwrap();
-            self.depth_image_and_view = DepthStencilImageAndView::new(
-                self.surface.extent(),
-                self.depth_image_and_view.format(),
-                self.device.clone(),
-            )
-            .unwrap();
-            self.swapchain_batch.recreate().unwrap();
-            self.recreate_swapchain_framebuffers();
-        }
-    }
-
-    pub fn recreate_swapchain_framebuffers(&mut self) {
-        unsafe {
-            self.swapchain_framebuffers
-                .iter()
-                .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
-            self.swapchain_framebuffers = helper::create_swapchain_frame_buffer(
-                &self.swapchain_batch,
-                &self.renderpass,
-                self.surface.extent(),
-                &self.device,
-                self.depth_image_and_view.image_view(),
-            )
+            self.fixed_vulkan_stuff
+                .device
+                .cmd_end_render_pass(command_buffer);
+            self.fixed_vulkan_stuff
+                .device
+                .end_command_buffer(command_buffer)
+                .unwrap();
         }
     }
 }
@@ -596,65 +494,30 @@ impl VulkanObjects {
 impl Drop for VulkanObjects {
     fn drop(&mut self) {
         unsafe {
-            [
-                self.image_available_semaphores,
-                self.render_finished_semaphores,
-            ]
-            .concat()
-            .into_iter()
-            .for_each(|sm| self.device.destroy_semaphore(sm, None));
-            self.in_flight_fences
-                .into_iter()
-                .for_each(|fence| self.device.destroy_fence(fence, None));
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .destroy_image_view(self.texture_image_view, None);
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .destroy_sampler(self.texture_image_sampler, None);
-            self.device.destroy_command_pool(self.command_pool, None);
-            self.swapchain_framebuffers
-                .iter()
-                .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device
+            self.fixed_vulkan_stuff
+                .device
+                .destroy_pipeline(self.pipeline, None);
+            self.fixed_vulkan_stuff
+                .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device
+            self.fixed_vulkan_stuff
+                .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device.destroy_render_pass(self.renderpass, None);
         }
     }
 }
 
 mod helper {
     use super::*;
-
-    pub(super) fn create_swapchain_frame_buffer(
-        swapchain_batch: &SwapChainBatch,
-        render_pass: &vk::RenderPass,
-        extent: vk::Extent2D,
-        device: &Device,
-        depth_image_view: &vk::ImageView,
-    ) -> Vec<vk::Framebuffer> {
-        swapchain_batch
-            .image_views()
-            .iter()
-            .map(|image_view| {
-                let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
-                    .render_pass(*render_pass)
-                    .attachments(&[*image_view, *depth_image_view])
-                    .width(extent.width)
-                    .height(extent.height)
-                    .layers(1)
-                    .build();
-                unsafe {
-                    device
-                        .create_framebuffer(&framebuffer_create_info, None)
-                        .expect("Fail to create framebuffer")
-                }
-            })
-            .collect::<Vec<_>>()
-    }
 
     pub(super) fn create_pipeline(
         device: Rc<Device>,
@@ -763,72 +626,6 @@ mod helper {
         };
 
         (pipeline_layout, pipeline)
-    }
-
-    pub(super) fn create_renderpass(
-        color_format: vk::Format,
-        depth_format: vk::Format,
-        device: &Device,
-    ) -> vk::RenderPass {
-        let color_attach = vk::AttachmentDescription::builder()
-            .format(color_format)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
-            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-            .build();
-        let depth_attach = vk::AttachmentDescription::builder()
-            .format(depth_format)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
-            .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-            .build();
-        let color_attach_ref = vk::AttachmentReference::builder()
-            .attachment(0)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .build();
-        let depth_attach_ref = vk::AttachmentReference::builder()
-            .attachment(1)
-            .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-        let subpass_desc = vk::SubpassDescription::builder()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&[color_attach_ref])
-            .depth_stencil_attachment(&depth_attach_ref)
-            .build();
-        let dependency = vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-            )
-            .src_access_mask(vk::AccessFlags::default())
-            .dst_stage_mask(
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-            )
-            .dst_access_mask(
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-            )
-            .build();
-        let renderpass_create_info = vk::RenderPassCreateInfo::builder()
-            .attachments(&[color_attach, depth_attach])
-            .subpasses(&[subpass_desc])
-            .dependencies(&[dependency])
-            .build();
-        unsafe {
-            device
-                .create_render_pass(&renderpass_create_info, None)
-                .expect("Fail to create renderpass")
-        }
     }
 
     pub(super) fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {

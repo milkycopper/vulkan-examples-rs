@@ -88,13 +88,13 @@ impl Vertex {
 
         unsafe {
             let data_ptr = device.map_memory(
-                staging_buffer.vk_device_momory(),
+                staging_buffer.device_momory(),
                 0,
                 staging_buffer.size_in_bytes(),
                 vk::MemoryMapFlags::empty(),
             )?;
             std::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr as *mut Vertex, vertex_num);
-            device.unmap_memory(staging_buffer.vk_device_momory());
+            device.unmap_memory(staging_buffer.device_momory());
         }
 
         staging_buffer.copy_to(&vertex_buffer, command_pool, queue)?;

@@ -11,10 +11,10 @@ use super::Instance;
 use crate::error::{RenderError, RenderResult};
 
 pub struct SurfaceAttributes {
-    pub capabilities: vk::SurfaceCapabilitiesKHR,
-    pub format: vk::SurfaceFormatKHR,
-    pub present_mode: vk::PresentModeKHR,
-    pub extent: vk::Extent2D,
+    capabilities: vk::SurfaceCapabilitiesKHR,
+    format: vk::SurfaceFormatKHR,
+    present_mode: vk::PresentModeKHR,
+    extent: vk::Extent2D,
 }
 
 pub struct Surface {
@@ -69,8 +69,12 @@ impl Surface {
         self.attributes.borrow().extent
     }
 
-    pub fn attributes(&self) -> Ref<'_, SurfaceAttributes> {
-        self.attributes.borrow()
+    pub fn capabilities(&self) -> Ref<'_, vk::SurfaceCapabilitiesKHR> {
+        Ref::map(self.attributes.borrow(), |x| &x.capabilities)
+    }
+
+    pub fn present_mode(&self) -> vk::PresentModeKHR {
+        self.attributes.borrow().present_mode
     }
 
     pub fn refit_surface_attribute(&self, window: &Window) -> RenderResult<()> {
