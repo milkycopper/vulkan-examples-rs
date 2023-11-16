@@ -105,3 +105,22 @@ pub trait WindowApp {
         }
     }
 }
+
+#[macro_export]
+macro_rules! window_fns {
+    ($app_ty: ty) => {
+        fn on_window_resized(&mut self, _size: PhysicalSize<u32>) {
+            self.window_resized = true;
+        }
+
+        fn window_title() -> String {
+            stringify!(DrawTriangleApp).to_string()
+        }
+
+        fn window(&self) -> &Window {
+            &self.window
+        }
+    };
+}
+
+pub use window_fns;

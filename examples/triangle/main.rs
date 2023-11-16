@@ -7,6 +7,7 @@ use winit::{
 };
 
 use vulkan_example_rs::app::WindowApp;
+use vulkan_example_rs::window_fns;
 
 struct DrawTriangleApp {
     window: Window,
@@ -14,6 +15,8 @@ struct DrawTriangleApp {
 }
 
 impl WindowApp for DrawTriangleApp {
+    window_fns!(DrawTriangleApp);
+
     fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
         let window = WindowBuilder::new()
             .with_title(Self::window_title())
@@ -31,22 +34,6 @@ impl WindowApp for DrawTriangleApp {
     }
 
     fn on_keyboard_input(&mut self, _key_code: winit::event::VirtualKeyCode) {}
-
-    fn window_size(&self) -> PhysicalSize<u32> {
-        self.window.inner_size()
-    }
-
-    fn on_window_resized(&mut self, _size: PhysicalSize<u32>) {
-        self.window_resized = true;
-    }
-
-    fn window_title() -> String {
-        stringify!(DrawTriangleApp).to_string()
-    }
-
-    fn window(&self) -> &Window {
-        &self.window
-    }
 }
 
 fn main() {

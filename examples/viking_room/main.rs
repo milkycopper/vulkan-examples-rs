@@ -18,6 +18,7 @@ use vulkan_example_rs::{
         extent_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder, Surface,
         VulkanApiVersion,
     },
+    window_fns,
 };
 
 struct VikingRoomApp {
@@ -49,6 +50,8 @@ struct VikingRoomApp {
 }
 
 impl WindowApp for VikingRoomApp {
+    window_fns!(VikingRoomApp);
+
     fn draw_frame(&mut self) {
         unsafe {
             self.fixed_vulkan_stuff
@@ -133,10 +136,6 @@ impl WindowApp for VikingRoomApp {
 
         self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
         self.last_time = SystemTime::now();
-    }
-
-    fn on_window_resized(&mut self, _size: PhysicalSize<u32>) {
-        self.window_resized = true;
     }
 
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
@@ -355,14 +354,6 @@ impl WindowApp for VikingRoomApp {
             texture_image_sampler,
             clear_value: Self::clear_value(),
         }
-    }
-
-    fn window_title() -> String {
-        stringify!(VikingRoomApp).to_string()
-    }
-
-    fn window(&self) -> &Window {
-        &self.window
     }
 }
 
