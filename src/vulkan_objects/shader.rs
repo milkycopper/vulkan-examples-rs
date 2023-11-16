@@ -7,10 +7,19 @@ use ash::vk;
 use super::Device;
 use crate::error::RenderResult;
 
+pub struct ShaderModule(vk::ShaderModule, Rc<Device>);
+
+impl Drop for ShaderModule {
+    fn drop(&mut self) {
+        unsafe {
+            self.1.destroy_shader_module(self.0, None);
+        }
+    }
+}
+
 pub struct ShaderCreate {
     pub stage_create_info: vk::PipelineShaderStageCreateInfo,
-    pub module: vk::ShaderModule,
-    device: Rc<Device>,
+    pub module: ShaderModule,
 }
 
 impl ShaderCreate {
@@ -37,16 +46,7 @@ impl ShaderCreate {
             .build();
         Ok(Self {
             stage_create_info,
-            module,
-            device,
+            module: ShaderModule(module, device),
         })
-    }
-}
-
-impl Drop for ShaderCreate {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_shader_module(self.module, None);
-        }
     }
 }

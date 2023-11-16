@@ -14,7 +14,7 @@ mod swapchain;
 pub use swapchain::SwapChainBatch;
 
 mod shader;
-pub use shader::ShaderCreate;
+pub use shader::{ShaderCreate, ShaderModule};
 
 mod command;
 pub use command::OneTimeCommand;

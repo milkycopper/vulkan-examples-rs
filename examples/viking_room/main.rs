@@ -10,12 +10,12 @@ use winit::{
 };
 
 use vulkan_example_rs::{
-    app::{FixedVulkanStuff, WindowApp},
+    app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
     camera::Camera,
     mesh::Vertex,
     transforms::{Direction, MVPMatrix},
     vulkan_objects::{
-        extent_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder, ShaderCreate,
+        extent_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder, Surface,
         VulkanApiVersion,
     },
 };
@@ -284,12 +284,16 @@ impl VulkanObjects {
                 .unwrap()
         };
 
-        let (pipeline_layout, pipeline) = helper::create_pipeline(
-            fixed_vulkan_stuff.device.clone(),
-            fixed_vulkan_stuff.surface.extent(),
-            &fixed_vulkan_stuff.render_pass,
-            &[descriptor_set_layout],
-        );
+        let pipeline_creator = PipelineCreator {
+            device: fixed_vulkan_stuff.device.clone(),
+            surface: &fixed_vulkan_stuff.surface,
+            render_pass: fixed_vulkan_stuff.render_pass,
+            set_layouts: &[descriptor_set_layout],
+            vertex_bindings: &[Vertex::binding_description()],
+            vertex_attributes: &Vertex::attr_descriptions(),
+        };
+
+        let (pipeline_layout, pipeline) = pipeline_creator.build().unwrap();
 
         let vertex_buffer = Vertex::create_buffer(
             vertices,
@@ -516,117 +520,62 @@ impl Drop for VulkanObjects {
     }
 }
 
-mod helper {
-    use super::*;
+pub struct PipelineCreator<'a> {
+    device: Rc<Device>,
+    surface: &'a Surface,
+    render_pass: vk::RenderPass,
+    set_layouts: &'a [vk::DescriptorSetLayout],
+    vertex_bindings: &'a [vk::VertexInputBindingDescription],
+    vertex_attributes: &'a [vk::VertexInputAttributeDescription],
+}
 
-    pub(super) fn create_pipeline(
-        device: Rc<Device>,
-        swapchain_extent: vk::Extent2D,
-        renderpass: &vk::RenderPass,
-        descriptor_set_layouts: &[vk::DescriptorSetLayout],
-    ) -> (vk::PipelineLayout, vk::Pipeline) {
-        let shader_creates = [
-            ShaderCreate::with_spv_path(
-                "examples/shaders/viking_room/shader.vert.spv",
-                vk::ShaderStageFlags::VERTEX,
-                ShaderCreate::DEFAULT_SHADER_START_NAME,
-                device.clone(),
-            )
-            .unwrap(),
-            ShaderCreate::with_spv_path(
-                "examples/shaders/viking_room/shader.frag.spv",
-                vk::ShaderStageFlags::FRAGMENT,
-                ShaderCreate::DEFAULT_SHADER_START_NAME,
-                device.clone(),
-            )
-            .unwrap(),
-        ];
-        let (shader_infos, _shader_modules) = (
-            [
-                shader_creates[0].stage_create_info,
-                shader_creates[1].stage_create_info,
-            ],
-            [shader_creates[0].module, shader_creates[1].module],
-        );
+impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
+    fn device(&self) -> Rc<Device> {
+        self.device.clone()
+    }
+    fn vertex_spv_path(&self) -> String {
+        "examples/shaders/viking_room/shader.vert.spv".to_string()
+    }
 
-        let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::builder()
-            .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR])
-            .build();
-        let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(&[Vertex::binding_description()])
-            .vertex_attribute_descriptions(&Vertex::attr_descriptions())
-            .build();
-        let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-            .primitive_restart_enable(false)
-            .build();
-        let viewport_state_info = {
-            vk::PipelineViewportStateCreateInfo::builder()
-                .viewports(&[extent_helper::viewport_from_extent(swapchain_extent)])
-                .scissors(&[extent_helper::scissor_from_extent(swapchain_extent)])
-                .build()
-        };
-        let raster_state_info = vk::PipelineRasterizationStateCreateInfo::builder()
-            .depth_clamp_enable(false)
-            .rasterizer_discard_enable(false)
-            .polygon_mode(vk::PolygonMode::FILL)
-            .line_width(1.)
-            .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-            .depth_bias_enable(false)
-            .build();
-        let multisample_state_info = vk::PipelineMultisampleStateCreateInfo::builder()
-            .sample_shading_enable(false)
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-            .build();
-        let color_blend_attach_state = vk::PipelineColorBlendAttachmentState::builder()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(false)
-            .build();
-        let color_blend_state_info = vk::PipelineColorBlendStateCreateInfo::builder()
-            .logic_op_enable(false)
-            .attachments(&[color_blend_attach_state])
-            .build();
+    fn frag_spv_path(&self) -> String {
+        "examples/shaders/viking_room/shader.frag.spv".to_string()
+    }
+
+    fn extent(&self) -> vk::Extent2D {
+        self.surface.extent()
+    }
+
+    fn render_pass(&self) -> vk::RenderPass {
+        self.render_pass
+    }
+
+    fn subpass(&self) -> u32 {
+        0
+    }
+
+    fn pipeline_layout(&self) -> vk::PipelineLayout {
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(descriptor_set_layouts)
+            .set_layouts(self.set_layouts)
             .push_constant_ranges(&[])
             .build();
-        let pipeline_layout = unsafe {
-            device
+        unsafe {
+            self.device
                 .create_pipeline_layout(&pipeline_layout_info, None)
-                .expect("Fail to create pipeline layout")
-        };
-        let depth_stencil_state_info = vk::PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(true)
-            .depth_write_enable(true)
-            .depth_compare_op(vk::CompareOp::LESS)
-            .depth_bounds_test_enable(false)
-            .stencil_test_enable(false)
-            .build();
-
-        let pipeline_create_info = vk::GraphicsPipelineCreateInfo::builder()
-            .stages(&shader_infos)
-            .vertex_input_state(&vertex_input_info)
-            .input_assembly_state(&input_assembly_info)
-            .viewport_state(&viewport_state_info)
-            .rasterization_state(&raster_state_info)
-            .multisample_state(&multisample_state_info)
-            .color_blend_state(&color_blend_state_info)
-            .dynamic_state(&dynamic_state_info)
-            .layout(pipeline_layout)
-            .render_pass(*renderpass)
-            .subpass(0)
-            .depth_stencil_state(&depth_stencil_state_info)
-            .build();
-
-        let pipeline = unsafe {
-            device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None)
-                .expect("Fail to create graphics pipeline")[0]
-        };
-
-        (pipeline_layout, pipeline)
+                .unwrap()
+        }
     }
+
+    fn vertex_binding_descriptions(&self) -> &'a [vk::VertexInputBindingDescription] {
+        self.vertex_bindings
+    }
+
+    fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription] {
+        self.vertex_attributes
+    }
+}
+
+mod helper {
+    use super::*;
 
     pub(super) fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {
         let ubo_layout_binding = vk::DescriptorSetLayoutBinding::builder()
