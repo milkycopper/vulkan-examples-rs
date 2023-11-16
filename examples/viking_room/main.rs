@@ -10,7 +10,7 @@ use winit::{
 };
 
 use vulkan_example_rs::{
-    app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
+    app::{ClearValue, FixedVulkanStuff, PipelineBuilder, WindowApp},
     camera::Camera,
     mesh::Vertex,
     transforms::{Direction, MVPMatrix},
@@ -32,35 +32,41 @@ struct VikingRoomApp {
 
     camera: Camera,
 
-    vulkan_objs: VulkanObjects,
+    fixed_vulkan_stuff: FixedVulkanStuff,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: [vk::DescriptorSet; 2],
+    pipeline_layout: vk::PipelineLayout,
+    pipeline: vk::Pipeline,
+    vertex_buffer: Buffer<Vertex>,
+    indice_buffer: Buffer<u32>,
+    uniform_buffers: [(Buffer<MVPMatrix>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
+    #[allow(dead_code)]
+    texture_image: ImageBuffer,
+    texture_image_view: vk::ImageView,
+    texture_image_sampler: vk::Sampler,
+    clear_value: ClearValue,
 }
 
 impl WindowApp for VikingRoomApp {
     fn draw_frame(&mut self) {
         unsafe {
-            let vk_objs = &mut self.vulkan_objs;
-
-            vk_objs
-                .fixed_vulkan_stuff
+            self.fixed_vulkan_stuff
                 .device
                 .wait_for_fences(
-                    &[vk_objs.fixed_vulkan_stuff.in_flight_fences[self.current_frame]],
+                    &[self.fixed_vulkan_stuff.in_flight_fences[self.current_frame]],
                     true,
                     u64::MAX,
                 )
                 .unwrap();
 
-            let result = vk_objs
-                .fixed_vulkan_stuff
-                .swapchain_batch
-                .acquire_next_image(
-                    vk_objs.fixed_vulkan_stuff.image_available_semaphores[self.current_frame],
-                );
+            let result = self.fixed_vulkan_stuff.swapchain_batch.acquire_next_image(
+                self.fixed_vulkan_stuff.image_available_semaphores[self.current_frame],
+            );
 
             match result {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    vk_objs
-                        .fixed_vulkan_stuff
+                    self.fixed_vulkan_stuff
                         .recreate_swapchain(&self.window)
                         .unwrap();
                     return;
@@ -71,48 +77,45 @@ impl WindowApp for VikingRoomApp {
 
             let image_index = result.unwrap().0;
 
-            vk_objs
-                .update_uniform_buffer(&self.camera, &vk_objs.uniform_buffers[self.current_frame]);
+            self.update_uniform_buffer(&self.camera, &self.uniform_buffers[self.current_frame]);
 
-            vk_objs
-                .fixed_vulkan_stuff
+            self.fixed_vulkan_stuff
                 .device
-                .reset_fences(&[vk_objs.fixed_vulkan_stuff.in_flight_fences[self.current_frame]])
+                .reset_fences(&[self.fixed_vulkan_stuff.in_flight_fences[self.current_frame]])
                 .unwrap();
 
-            vk_objs.record_render_commands(
-                vk_objs.fixed_vulkan_stuff.command_buffers[self.current_frame],
-                vk_objs.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
-                vk_objs.descriptor_sets[self.current_frame],
+            self.record_render_commands(
+                self.fixed_vulkan_stuff.command_buffers[self.current_frame],
+                self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
+                self.descriptor_sets[self.current_frame],
                 self.model_vertices.len() as u32,
                 self.model_indices.len() as u32,
             );
 
             let submit_info = vk::SubmitInfo::builder()
                 .wait_semaphores(&[
-                    vk_objs.fixed_vulkan_stuff.image_available_semaphores[self.current_frame]
+                    self.fixed_vulkan_stuff.image_available_semaphores[self.current_frame]
                 ])
                 .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-                .command_buffers(&[vk_objs.fixed_vulkan_stuff.command_buffers[self.current_frame]])
+                .command_buffers(&[self.fixed_vulkan_stuff.command_buffers[self.current_frame]])
                 .signal_semaphores(&[
-                    vk_objs.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]
+                    self.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]
                 ])
                 .build();
 
-            vk_objs
-                .fixed_vulkan_stuff
+            self.fixed_vulkan_stuff
                 .device
                 .queue_submit(
-                    vk_objs.fixed_vulkan_stuff.device.graphic_queue(),
+                    self.fixed_vulkan_stuff.device.graphic_queue(),
                     &[submit_info],
-                    vk_objs.fixed_vulkan_stuff.in_flight_fences[self.current_frame],
+                    self.fixed_vulkan_stuff.in_flight_fences[self.current_frame],
                 )
                 .unwrap();
 
-            let result = vk_objs.fixed_vulkan_stuff.swapchain_batch.queue_present(
+            let result = self.fixed_vulkan_stuff.swapchain_batch.queue_present(
                 image_index,
-                &[vk_objs.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]],
-                &vk_objs.fixed_vulkan_stuff.device.graphic_queue(),
+                &[self.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]],
+                &self.fixed_vulkan_stuff.device.graphic_queue(),
             );
 
             let need_recreate = match result {
@@ -122,8 +125,7 @@ impl WindowApp for VikingRoomApp {
             };
             if need_recreate || self.window_resized {
                 self.window_resized = false;
-                vk_objs
-                    .fixed_vulkan_stuff
+                self.fixed_vulkan_stuff
                     .recreate_swapchain(&self.window)
                     .unwrap();
             }
@@ -172,83 +174,43 @@ impl WindowApp for VikingRoomApp {
             vulkan_example_rs::mesh::load_obj_model("examples/meshes/viking_room/viking_room.obj")
                 .unwrap();
 
-        let vulkan_objs = VulkanObjects::new(
-            stringify!(VikingRoomApp),
-            "No Engine",
-            &window,
-            &model_vertices,
-            &model_indices,
-        );
-
-        VikingRoomApp {
-            window,
-            window_resized: false,
-
-            current_frame: 0,
-            last_time: SystemTime::now(),
-
-            model_vertices,
-            model_indices,
-
-            camera: Camera::default()
-                .with_move_speed(100.)
-                .with_rotate_speed(400.),
-
-            vulkan_objs,
-        }
-    }
-
-    fn run(&mut self, event_loop: &mut RefCell<EventLoop<()>>) {
-        env_logger::init();
-        self.render_loop(event_loop);
-        unsafe {
-            self.vulkan_objs
-                .fixed_vulkan_stuff
-                .device
-                .device_wait_idle()
-                .unwrap()
-        };
-    }
-}
-
-struct VulkanObjects {
-    fixed_vulkan_stuff: FixedVulkanStuff,
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: [vk::DescriptorSet; 2],
-    pipeline_layout: vk::PipelineLayout,
-    pipeline: vk::Pipeline,
-    vertex_buffer: Buffer<Vertex>,
-    indice_buffer: Buffer<u32>,
-    uniform_buffers: [(Buffer<MVPMatrix>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
-    #[allow(dead_code)]
-    texture_image: ImageBuffer,
-    texture_image_view: vk::ImageView,
-    texture_image_sampler: vk::Sampler,
-}
-
-impl VulkanObjects {
-    pub fn new(
-        app_name: &str,
-        engine_name: &str,
-        window: &Window,
-        vertices: &Vec<Vertex>,
-        indices: &Vec<u32>,
-    ) -> Self {
         let instance = Rc::new(
-            InstanceBuilder::new(window)
-                .with_app_name_and_version(app_name, 0)
-                .with_engine_name_and_version(engine_name, 0)
+            InstanceBuilder::new(&window)
+                .with_app_name_and_version(stringify!(VikingRoomApp), 0)
+                .with_engine_name_and_version("No Engine", 0)
                 .with_vulkan_api_version(VulkanApiVersion::V1_0)
                 .enable_validation_layer()
                 .build()
                 .unwrap(),
         );
-        let fixed_vulkan_stuff = FixedVulkanStuff::new(window, instance).unwrap();
 
-        let descriptor_set_layout =
-            helper::create_descriptor_set_layout(&fixed_vulkan_stuff.device);
+        let fixed_vulkan_stuff = FixedVulkanStuff::new(&window, instance).unwrap();
+        let descriptor_set_layout = {
+            let ubo_layout_binding = vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .descriptor_count(1)
+                .build();
 
+            let sampler_layout_binding = vk::DescriptorSetLayoutBinding::builder()
+                .binding(1)
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .build();
+
+            let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                .bindings(&[ubo_layout_binding, sampler_layout_binding])
+                .build();
+
+            unsafe {
+                fixed_vulkan_stuff
+                    .device
+                    .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
+                    .unwrap()
+            }
+        };
         let descriptor_pool = unsafe {
             let create_info = vk::DescriptorPoolCreateInfo::builder()
                 .pool_sizes(
@@ -296,7 +258,7 @@ impl VulkanObjects {
         let (pipeline_layout, pipeline) = pipeline_creator.build().unwrap();
 
         let vertex_buffer = Vertex::create_buffer(
-            vertices,
+            &model_vertices,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
@@ -304,7 +266,7 @@ impl VulkanObjects {
         .unwrap();
 
         let indice_buffer = Buffer::new_indice_buffer(
-            indices,
+            &model_indices,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
@@ -369,7 +331,20 @@ impl VulkanObjects {
             }
         }
 
-        VulkanObjects {
+        VikingRoomApp {
+            window,
+            window_resized: false,
+
+            current_frame: 0,
+            last_time: SystemTime::now(),
+
+            model_vertices,
+            model_indices,
+
+            camera: Camera::default()
+                .with_move_speed(100.)
+                .with_rotate_speed(400.),
+
             fixed_vulkan_stuff,
             descriptor_set_layout,
             descriptor_pool,
@@ -382,10 +357,13 @@ impl VulkanObjects {
             texture_image,
             texture_image_view,
             texture_image_sampler,
+            clear_value: Self::clear_value(),
         }
     }
+}
 
-    pub fn update_uniform_buffer(
+impl VikingRoomApp {
+    fn update_uniform_buffer(
         &self,
         camera: &Camera,
         uniform_buffer: &(Buffer<MVPMatrix>, *mut c_void),
@@ -407,7 +385,7 @@ impl VulkanObjects {
         }
     }
 
-    pub fn record_render_commands(
+    fn record_render_commands(
         &self,
         command_buffer: vk::CommandBuffer,
         frame_buffer: vk::Framebuffer,
@@ -428,11 +406,17 @@ impl VulkanObjects {
 
             self.fixed_vulkan_stuff.device.cmd_begin_render_pass(
                 command_buffer,
-                &helper::create_renderpass_begin_info(
-                    &self.fixed_vulkan_stuff.render_pass,
-                    &frame_buffer,
-                    self.fixed_vulkan_stuff.surface.extent(),
-                ),
+                &vk::RenderPassBeginInfo::builder()
+                    .render_pass(self.fixed_vulkan_stuff.render_pass)
+                    .framebuffer(frame_buffer)
+                    .render_area(
+                        vk::Rect2D::builder()
+                            .offset(vk::Offset2D { x: 0, y: 0 })
+                            .extent(self.fixed_vulkan_stuff.surface.extent())
+                            .build(),
+                    )
+                    .clear_values(&self.clear_value.to_array())
+                    .build(),
                 vk::SubpassContents::INLINE,
             );
 
@@ -495,9 +479,10 @@ impl VulkanObjects {
     }
 }
 
-impl Drop for VulkanObjects {
+impl Drop for VikingRoomApp {
     fn drop(&mut self) {
         unsafe {
+            self.fixed_vulkan_stuff.device.device_wait_idle().unwrap();
             self.fixed_vulkan_stuff
                 .device
                 .destroy_image_view(self.texture_image_view, None);
@@ -571,66 +556,6 @@ impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
 
     fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription] {
         self.vertex_attributes
-    }
-}
-
-mod helper {
-    use super::*;
-
-    pub(super) fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {
-        let ubo_layout_binding = vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .descriptor_count(1)
-            .build();
-
-        let sampler_layout_binding = vk::DescriptorSetLayoutBinding::builder()
-            .binding(1)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-            .build();
-
-        let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&[ubo_layout_binding, sampler_layout_binding])
-            .build();
-
-        unsafe {
-            device
-                .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
-                .unwrap()
-        }
-    }
-
-    pub(super) fn create_renderpass_begin_info(
-        render_pass: &vk::RenderPass,
-        frame_buffer: &vk::Framebuffer,
-        extent: vk::Extent2D,
-    ) -> vk::RenderPassBeginInfo {
-        vk::RenderPassBeginInfo::builder()
-            .render_pass(*render_pass)
-            .framebuffer(*frame_buffer)
-            .render_area(
-                vk::Rect2D::builder()
-                    .offset(vk::Offset2D { x: 0, y: 0 })
-                    .extent(extent)
-                    .build(),
-            )
-            .clear_values(&[
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0., 0., 0., 1.],
-                    },
-                },
-                vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 1.,
-                        stencil: 0,
-                    },
-                },
-            ])
-            .build()
     }
 }
 

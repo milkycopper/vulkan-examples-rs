@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 
+use ash::vk;
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -7,9 +8,19 @@ use winit::{
     platform::run_return::EventLoopExtRunReturn,
 };
 
+pub struct ClearValue {
+    pub color: vk::ClearValue,
+    pub depth_stencil: vk::ClearValue,
+}
+
+impl ClearValue {
+    pub fn to_array(&self) -> [vk::ClearValue; 2] {
+        [self.color, self.depth_stencil]
+    }
+}
+
 pub trait WindowApp {
     fn new(event_loop: &EventLoop<()>) -> Self;
-    fn run(&mut self, event_loop: &mut RefCell<EventLoop<()>>);
     fn draw_frame(&mut self);
 
     fn on_window_resized(&mut self, size: PhysicalSize<u32>);
@@ -66,5 +77,25 @@ pub trait WindowApp {
                     _ => (),
                 }
             });
+    }
+
+    fn run(&mut self, event_loop: &mut RefCell<EventLoop<()>>) {
+        self.render_loop(event_loop);
+    }
+
+    fn clear_value() -> ClearValue {
+        ClearValue {
+            color: vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0., 0., 0., 1.],
+                },
+            },
+            depth_stencil: vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.,
+                    stencil: 0,
+                },
+            },
+        }
     }
 }
