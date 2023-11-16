@@ -6,6 +6,7 @@ use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::EventLoop,
     platform::run_return::EventLoopExtRunReturn,
+    window::Window,
 };
 
 pub struct ClearValue {
@@ -26,7 +27,12 @@ pub trait WindowApp {
     fn on_window_resized(&mut self, size: PhysicalSize<u32>);
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode);
 
-    fn window_size(&self) -> PhysicalSize<u32>;
+    fn window_title() -> String;
+    fn window(&self) -> &Window;
+
+    fn window_size(&self) -> PhysicalSize<u32> {
+        self.window().inner_size()
+    }
 
     fn render_loop(&mut self, event_loop: &RefCell<EventLoop<()>>) {
         event_loop

@@ -135,10 +135,6 @@ impl WindowApp for VikingRoomApp {
         self.last_time = SystemTime::now();
     }
 
-    fn window_size(&self) -> PhysicalSize<u32> {
-        self.window.inner_size()
-    }
-
     fn on_window_resized(&mut self, _size: PhysicalSize<u32>) {
         self.window_resized = true;
     }
@@ -359,6 +355,14 @@ impl WindowApp for VikingRoomApp {
             texture_image_sampler,
             clear_value: Self::clear_value(),
         }
+    }
+
+    fn window_title() -> String {
+        stringify!(VikingRoomApp).to_string()
+    }
+
+    fn window(&self) -> &Window {
+        &self.window
     }
 }
 
