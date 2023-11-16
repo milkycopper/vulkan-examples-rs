@@ -33,13 +33,13 @@ pub trait PipelineBuilder<'a, P: AsRef<Path>> {
                 self.vertex_spv_path(),
                 vk::ShaderStageFlags::VERTEX,
                 ShaderCreate::DEFAULT_SHADER_START_NAME,
-                self.device().clone(),
+                self.device(),
             )?,
             ShaderCreate::with_spv_path(
                 self.frag_spv_path(),
                 vk::ShaderStageFlags::FRAGMENT,
                 ShaderCreate::DEFAULT_SHADER_START_NAME,
-                self.device().clone(),
+                self.device(),
             )?,
         ];
         let mut infos = vec![];
