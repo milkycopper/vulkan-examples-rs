@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 use ash::vk;
 use winit::{
@@ -7,6 +7,12 @@ use winit::{
     event_loop::EventLoop,
     platform::run_return::EventLoopExtRunReturn,
     window::Window,
+};
+
+use super::FixedVulkanStuff;
+use crate::{
+    error::RenderResult,
+    vulkan_objects::{InstanceBuilder, VulkanApiVersion},
 };
 
 pub struct ClearValue {
@@ -25,8 +31,6 @@ pub trait WindowApp {
     fn draw_frame(&mut self);
 
     fn on_window_resized(&mut self, size: PhysicalSize<u32>);
-    fn on_keyboard_input(&mut self, key_code: VirtualKeyCode);
-
     fn window_title() -> String;
     fn window(&self) -> &Window;
 
@@ -103,6 +107,21 @@ pub trait WindowApp {
                 },
             },
         }
+    }
+
+    fn on_keyboard_input(&mut self, _key_code: VirtualKeyCode) {}
+
+    fn create_fixed_vulkan_stuff(window: &Window) -> RenderResult<FixedVulkanStuff> {
+        let instance = Rc::new(
+            InstanceBuilder::new(window)
+                .with_app_name_and_version(Self::window_title().as_str(), 0)
+                .with_engine_name_and_version("No Engine", 0)
+                .with_vulkan_api_version(VulkanApiVersion::V1_0)
+                .enable_validation_layer()
+                .build()
+                .unwrap(),
+        );
+        FixedVulkanStuff::new(window, instance)
     }
 }
 

@@ -10,14 +10,11 @@ use winit::{
 };
 
 use vulkan_example_rs::{
-    app::{ClearValue, FixedVulkanStuff, PipelineBuilder, WindowApp},
+    app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
     camera::Camera,
     mesh::Vertex,
     transforms::{Direction, MVPMatrix},
-    vulkan_objects::{
-        extent_helper, image_helper, Buffer, Device, ImageBuffer, InstanceBuilder, Surface,
-        VulkanApiVersion,
-    },
+    vulkan_objects::{extent_helper, image_helper, Buffer, Device, ImageBuffer, Surface},
     window_fns,
 };
 
@@ -46,7 +43,6 @@ struct VikingRoomApp {
     texture_image: ImageBuffer,
     texture_image_view: vk::ImageView,
     texture_image_sampler: vk::Sampler,
-    clear_value: ClearValue,
 }
 
 impl WindowApp for VikingRoomApp {
@@ -160,7 +156,7 @@ impl WindowApp for VikingRoomApp {
 
     fn new(event_loop: &EventLoop<()>) -> Self {
         let window = WindowBuilder::new()
-            .with_title(stringify!(VikingRoomApp))
+            .with_title(Self::window_title())
             .with_inner_size(PhysicalSize::new(1800, 1200))
             .build(event_loop)
             .unwrap();
@@ -169,17 +165,7 @@ impl WindowApp for VikingRoomApp {
             vulkan_example_rs::mesh::load_obj_model("examples/meshes/viking_room/viking_room.obj")
                 .unwrap();
 
-        let instance = Rc::new(
-            InstanceBuilder::new(&window)
-                .with_app_name_and_version(stringify!(VikingRoomApp), 0)
-                .with_engine_name_and_version("No Engine", 0)
-                .with_vulkan_api_version(VulkanApiVersion::V1_0)
-                .enable_validation_layer()
-                .build()
-                .unwrap(),
-        );
-
-        let fixed_vulkan_stuff = FixedVulkanStuff::new(&window, instance).unwrap();
+        let fixed_vulkan_stuff = Self::create_fixed_vulkan_stuff(&window).unwrap();
         let descriptor_set_layout = {
             let ubo_layout_binding = vk::DescriptorSetLayoutBinding::builder()
                 .binding(0)
@@ -352,7 +338,6 @@ impl WindowApp for VikingRoomApp {
             texture_image,
             texture_image_view,
             texture_image_sampler,
-            clear_value: Self::clear_value(),
         }
     }
 }
@@ -410,7 +395,7 @@ impl VikingRoomApp {
                             .extent(self.fixed_vulkan_stuff.surface.extent())
                             .build(),
                     )
-                    .clear_values(&self.clear_value.to_array())
+                    .clear_values(&Self::clear_value().to_array())
                     .build(),
                 vk::SubpassContents::INLINE,
             );
@@ -500,7 +485,7 @@ impl Drop for VikingRoomApp {
     }
 }
 
-pub struct PipelineCreator<'a> {
+struct PipelineCreator<'a> {
     device: Rc<Device>,
     surface: &'a Surface,
     render_pass: vk::RenderPass,
