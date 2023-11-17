@@ -4,7 +4,6 @@ use ash::vk;
 use glam::{Mat4, Vec3};
 use winit::{
     dpi::PhysicalSize,
-    event::VirtualKeyCode,
     event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
@@ -13,7 +12,7 @@ use vulkan_example_rs::{
     app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
     camera::Camera,
     mesh::Vertex,
-    transforms::{Direction, MVPMatrix},
+    transforms::MVPMatrix,
     vulkan_objects::{extent_helper, image_helper, Buffer, Device, ImageBuffer, Surface},
     window_fns,
 };
@@ -132,26 +131,6 @@ impl WindowApp for VikingRoomApp {
 
         self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
         self.last_time = SystemTime::now();
-    }
-
-    fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
-        let duration = SystemTime::now()
-            .duration_since(self.last_time)
-            .unwrap()
-            .as_secs_f32();
-        match key_code {
-            VirtualKeyCode::W => self.camera.translate_in_time(Direction::Up, duration),
-            VirtualKeyCode::S => self.camera.translate_in_time(Direction::Down, duration),
-            VirtualKeyCode::A => self.camera.translate_in_time(Direction::Left, duration),
-            VirtualKeyCode::D => self.camera.translate_in_time(Direction::Right, duration),
-            VirtualKeyCode::Q => self.camera.translate_in_time(Direction::Front, duration),
-            VirtualKeyCode::E => self.camera.translate_in_time(Direction::Back, duration),
-            VirtualKeyCode::Up => self.camera.rotate_in_time(Direction::Up, duration),
-            VirtualKeyCode::Down => self.camera.rotate_in_time(Direction::Down, duration),
-            VirtualKeyCode::Left => self.camera.rotate_in_time(Direction::Left, duration),
-            VirtualKeyCode::Right => self.camera.rotate_in_time(Direction::Right, duration),
-            _ => {}
-        }
     }
 
     fn new(event_loop: &EventLoop<()>) -> Self {
@@ -322,10 +301,9 @@ impl WindowApp for VikingRoomApp {
             model_vertices,
             model_indices,
 
-            camera: Camera::default()
+            camera: Camera::with_translation(Vec3::new(0., 0., -3.))
                 .with_move_speed(100.)
                 .with_rotate_speed(400.),
-
             fixed_vulkan_stuff,
             descriptor_set_layout,
             descriptor_pool,
@@ -340,6 +318,14 @@ impl WindowApp for VikingRoomApp {
             texture_image_sampler,
         }
     }
+
+    fn time_stamp(&self) -> SystemTime {
+        self.last_time
+    }
+
+    fn camera(&mut self) -> &mut Camera {
+        &mut self.camera
+    }
 }
 
 impl VikingRoomApp {
@@ -349,11 +335,9 @@ impl VikingRoomApp {
         uniform_buffer: &(Buffer<MVPMatrix>, *mut c_void),
     ) {
         let mvp_matrix = MVPMatrix {
-            model: Mat4::from_axis_angle(Vec3::X, 2.3 * core::f32::consts::FRAC_PI_2)
-                * Mat4::from_axis_angle(Vec3::Y, -0.46 * core::f32::consts::FRAC_PI_2)
-                * Mat4::from_axis_angle(Vec3::Z, -1.1 * core::f32::consts::FRAC_PI_2),
-            view: camera.view_transform(),
-            projection: camera.projection_transform(),
+            model: Mat4::IDENTITY,
+            view: camera.view_mat(),
+            projection: camera.perspective_mat(),
         };
 
         unsafe {

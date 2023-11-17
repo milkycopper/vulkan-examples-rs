@@ -1,39 +1,61 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{EulerRot, Mat4, Quat, Vec3};
 
 use super::transforms::Direction;
+
+pub enum CameraType {
+    FirstPerson,
+    LookAt,
+}
 
 pub struct Camera {
     translation: Vec3,
     rotation: Quat,
-    visual_angle: f32, // radius in (0, Pi)
+    fov: f32, // radius in (0, Pi)
     aspect_ratio: f32,
     z_limits: [f32; 2],
     move_speed: f32,
     rotate_speed: f32,
+    camera_type: CameraType,
+    view_mat: Mat4,
+    perspective_mat: Mat4,
 }
 
 impl Default for Camera {
     fn default() -> Self {
-        Self {
-            translation: Vec3::default(),
-            rotation: Quat::default(),
-            visual_angle: FRAC_PI_2,
+        let eye = Vec3::new(0., 0., -10.);
+        let mut camera = Camera {
+            translation: eye,
+            rotation: Quat::from_mat4(&Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y)),
+            fov: FRAC_PI_2,
             aspect_ratio: 1.,
             z_limits: [0.1, 10.],
             move_speed: 1.,
             rotate_speed: 1.,
-        }
+            camera_type: CameraType::LookAt,
+            view_mat: Mat4::IDENTITY,
+            perspective_mat: Mat4::IDENTITY,
+        };
+        camera.perspective_mat = Mat4::perspective_rh(
+            camera.fov,
+            camera.aspect_ratio,
+            camera.z_limits[0],
+            camera.z_limits[1],
+        );
+        camera.update_view_mat();
+        camera
     }
 }
 
 impl Camera {
     pub fn with_translation(t: Vec3) -> Self {
-        Self {
+        let mut c = Self {
             translation: t,
             ..Default::default()
-        }
+        };
+        c.update_view_mat();
+        c
     }
 
     pub fn with_rotation(mut self, r: Quat) -> Self {
@@ -41,10 +63,10 @@ impl Camera {
         self
     }
 
-    /// Set visual angle in radius within (0, Pi)
-    pub fn with_visual_angle(mut self, angle: f32) -> Self {
-        assert!(angle > 0. && angle < PI);
-        self.visual_angle = angle;
+    /// Set fov in radius within (0, Pi)
+    pub fn with_fov(mut self, fov: f32) -> Self {
+        assert!(fov > 0. && fov < PI);
+        self.fov = fov;
         self
     }
 
@@ -68,6 +90,11 @@ impl Camera {
         self
     }
 
+    pub fn with_type(mut self, camera_type: CameraType) -> Self {
+        self.camera_type = camera_type;
+        self
+    }
+
     pub fn translate(&mut self, direction: Direction, distance: f32) {
         let moving_direction = match direction {
             Direction::Up => Vec3::Y,
@@ -78,6 +105,7 @@ impl Camera {
             Direction::Back => Vec3::NEG_Z,
         };
         self.translation += moving_direction * distance;
+        self.update_view_mat();
     }
 
     pub fn translate_in_time(&mut self, direction: Direction, time: f32) {
@@ -85,35 +113,41 @@ impl Camera {
     }
 
     pub fn rotate(&mut self, direction: Direction, angle: f32) {
-        let axis = self.rotation
-            * match direction {
-                Direction::Up => Vec3::X,
-                Direction::Down => Vec3::NEG_X,
-                Direction::Left => Vec3::Y,
-                Direction::Right => Vec3::NEG_Y,
-                Direction::Front | Direction::Back => unreachable!(),
-            };
-        self.rotation *= Quat::from_axis_angle(axis, angle);
+        let mut euler = self.rotation.to_euler(EulerRot::XYZ);
+        match direction {
+            Direction::Up => euler.1 += angle,
+            Direction::Down => euler.1 -= angle,
+            Direction::Left => euler.0 -= angle,
+            Direction::Right => euler.0 += angle,
+            Direction::Front => euler.2 += angle,
+            Direction::Back => euler.2 -= angle,
+        };
+        self.rotation = Quat::from_euler(EulerRot::XYZ, euler.0, euler.1, euler.2);
+        self.update_view_mat()
     }
 
     pub fn rotate_in_time(&mut self, direction: Direction, time: f32) {
         self.rotate(direction, time * self.rotate_speed)
     }
 
-    pub fn view_transform(&self) -> Mat4 {
-        Mat4::look_at_rh(
-            self.translation,
-            self.rotation * Vec3::Z,
-            self.rotation * Vec3::Y,
-        )
+    pub fn view_mat(&self) -> Mat4 {
+        self.view_mat
     }
 
-    pub fn projection_transform(&self) -> Mat4 {
-        Mat4::perspective_rh(
-            self.visual_angle,
-            self.aspect_ratio,
-            self.z_limits[0],
-            self.z_limits[1],
-        )
+    pub fn perspective_mat(&self) -> Mat4 {
+        self.perspective_mat
+    }
+
+    fn update_view_mat(&mut self) {
+        match self.camera_type {
+            CameraType::FirstPerson => {
+                self.view_mat =
+                    Mat4::from_quat(self.rotation) * Mat4::from_translation(self.translation)
+            }
+            CameraType::LookAt => {
+                self.view_mat =
+                    Mat4::from_translation(self.translation) * Mat4::from_quat(self.rotation)
+            }
+        }
     }
 }

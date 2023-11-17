@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::SystemTime};
 
 use ash::vk;
 use winit::{
@@ -11,7 +11,9 @@ use winit::{
 
 use super::FixedVulkanStuff;
 use crate::{
+    camera::Camera,
     error::RenderResult,
+    transforms::Direction,
     vulkan_objects::{InstanceBuilder, VulkanApiVersion},
 };
 
@@ -33,6 +35,9 @@ pub trait WindowApp {
     fn on_window_resized(&mut self, size: PhysicalSize<u32>);
     fn window_title() -> String;
     fn window(&self) -> &Window;
+
+    fn time_stamp(&self) -> SystemTime;
+    fn camera(&mut self) -> &mut Camera;
 
     fn window_size(&self) -> PhysicalSize<u32> {
         self.window().inner_size()
@@ -109,7 +114,27 @@ pub trait WindowApp {
         }
     }
 
-    fn on_keyboard_input(&mut self, _key_code: VirtualKeyCode) {}
+    fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
+        let duration = SystemTime::now()
+            .duration_since(self.time_stamp())
+            .unwrap()
+            .as_secs_f32();
+        match key_code {
+            VirtualKeyCode::W => self.camera().translate_in_time(Direction::Up, duration),
+            VirtualKeyCode::S => self.camera().translate_in_time(Direction::Down, duration),
+            VirtualKeyCode::A => self.camera().translate_in_time(Direction::Left, duration),
+            VirtualKeyCode::D => self.camera().translate_in_time(Direction::Right, duration),
+            VirtualKeyCode::Q => self.camera().translate_in_time(Direction::Front, duration),
+            VirtualKeyCode::E => self.camera().translate_in_time(Direction::Back, duration),
+            VirtualKeyCode::I => self.camera().rotate_in_time(Direction::Up, duration),
+            VirtualKeyCode::K => self.camera().rotate_in_time(Direction::Down, duration),
+            VirtualKeyCode::J => self.camera().rotate_in_time(Direction::Left, duration),
+            VirtualKeyCode::L => self.camera().rotate_in_time(Direction::Right, duration),
+            VirtualKeyCode::U => self.camera().rotate_in_time(Direction::Front, duration),
+            VirtualKeyCode::O => self.camera().rotate_in_time(Direction::Back, duration),
+            _ => {}
+        }
+    }
 
     fn create_fixed_vulkan_stuff(window: &Window) -> RenderResult<FixedVulkanStuff> {
         let instance = Rc::new(
