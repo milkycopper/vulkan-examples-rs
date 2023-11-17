@@ -15,7 +15,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
+    fn new(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
         let physical_device = instance.pick_physical_device();
         Ok(Self {
             inner: {
@@ -61,6 +61,15 @@ impl Device {
         })
     }
 
+    pub fn fill_queue_info(&mut self) {
+        unsafe {
+            self.queue_info.graphic_queue =
+                Some(self.get_device_queue(self.queue_info.graphic_family_index_priority.0, 0));
+            self.queue_info.present_queue =
+                Some(self.get_device_queue(self.queue_info.present_family_index_priority.0, 0));
+        };
+    }
+
     pub fn new_with_queue_loaded(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
         let mut device = Self::new(instance, queue_info)?;
         device.fill_queue_info();
@@ -81,15 +90,6 @@ impl Device {
             .iter()
             .map(|x| x.0)
             .collect()
-    }
-
-    pub fn fill_queue_info(&mut self) {
-        unsafe {
-            self.queue_info.graphic_queue =
-                Some(self.get_device_queue(self.queue_info.graphic_family_index_priority.0, 0));
-            self.queue_info.present_queue =
-                Some(self.get_device_queue(self.queue_info.present_family_index_priority.0, 0));
-        };
     }
 
     pub fn queue_info(&self) -> &QueueInfo {

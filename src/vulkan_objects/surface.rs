@@ -57,6 +57,10 @@ impl Surface {
         })
     }
 
+    pub fn new_with_default_format(window: &Window, instance: Rc<Instance>) -> RenderResult<Self> {
+        Self::new(window, instance, Self::DEFAULT_FORMAT)
+    }
+
     pub fn format(&self) -> vk::Format {
         self.attributes.borrow().format.format
     }

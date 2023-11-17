@@ -29,16 +29,14 @@ pub trait PipelineBuilder<'a, P: AsRef<Path>> {
         &self,
     ) -> RenderResult<(Vec<vk::PipelineShaderStageCreateInfo>, Vec<ShaderModule>)> {
         let shader_creates = vec![
-            ShaderCreate::with_spv_path(
+            ShaderCreate::with_spv_path_default_start_name(
                 self.vertex_spv_path(),
                 vk::ShaderStageFlags::VERTEX,
-                ShaderCreate::DEFAULT_SHADER_START_NAME,
                 self.device(),
             )?,
-            ShaderCreate::with_spv_path(
+            ShaderCreate::with_spv_path_default_start_name(
                 self.frag_spv_path(),
                 vk::ShaderStageFlags::FRAGMENT,
-                ShaderCreate::DEFAULT_SHADER_START_NAME,
                 self.device(),
             )?,
         ];

@@ -31,7 +31,7 @@ impl VulkanApiVersion {
 }
 
 pub struct InstanceBuilder<'a> {
-    window: &'a Window,
+    window: Option<&'a Window>,
     app_name: Option<&'a str>,
     engine_name: Option<&'a str>,
     app_version: u32,
@@ -40,10 +40,10 @@ pub struct InstanceBuilder<'a> {
     validation_layer_enabled: bool,
 }
 
-impl<'a> InstanceBuilder<'a> {
-    pub fn new(window: &'a Window) -> Self {
+impl<'a> Default for InstanceBuilder<'a> {
+    fn default() -> Self {
         Self {
-            window,
+            window: None,
             app_name: None,
             engine_name: None,
             app_version: 0,
@@ -51,6 +51,13 @@ impl<'a> InstanceBuilder<'a> {
             vulkan_api_version: VulkanApiVersion::V1_0,
             validation_layer_enabled: false,
         }
+    }
+}
+
+impl<'a> InstanceBuilder<'a> {
+    pub fn with_window(mut self, window: &'a Window) -> Self {
+        self.window = Some(window);
+        self
     }
 
     pub fn with_app_name_and_version(mut self, name: &'a str, version: u32) -> Self {
@@ -76,8 +83,11 @@ impl<'a> InstanceBuilder<'a> {
     }
 
     pub fn build(&self) -> RenderResult<Instance> {
-        let mut extensions =
-            ash_window::enumerate_required_extensions(self.window.raw_display_handle())?.to_vec();
+        let mut extensions = if let Some(window) = self.window {
+            ash_window::enumerate_required_extensions(window.raw_display_handle())?.to_vec()
+        } else {
+            vec![]
+        };
 
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         [

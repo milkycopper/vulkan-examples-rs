@@ -159,7 +159,7 @@ impl ImageBuffer {
         Ok(())
     }
 
-    pub fn color_image_from_file<P: AsRef<Path>>(
+    pub fn rgba8_image_from_file<P: AsRef<Path>>(
         path: P,
         device: Rc<Device>,
         command_pool: &vk::CommandPool,
@@ -167,6 +167,7 @@ impl ImageBuffer {
     ) -> RenderResult<Self> {
         let image_data = image_loader::io::Reader::open(&path)?.decode()?.to_rgba8();
         let size = image_data.len();
+
         let image_buffer = Self::new(
             image_data.width(),
             image_data.height(),

@@ -36,7 +36,7 @@ pub trait WindowApp {
     fn window_title() -> String;
     fn window(&self) -> &Window;
 
-    fn time_stamp(&self) -> SystemTime;
+    fn last_frame_time_stamp(&self) -> SystemTime;
     fn camera(&mut self) -> &mut Camera;
 
     fn window_size(&self) -> PhysicalSize<u32> {
@@ -116,7 +116,7 @@ pub trait WindowApp {
 
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
         let duration = SystemTime::now()
-            .duration_since(self.time_stamp())
+            .duration_since(self.last_frame_time_stamp())
             .unwrap()
             .as_secs_f32();
         match key_code {
@@ -138,7 +138,8 @@ pub trait WindowApp {
 
     fn create_fixed_vulkan_stuff(window: &Window) -> RenderResult<FixedVulkanStuff> {
         let instance = Rc::new(
-            InstanceBuilder::new(window)
+            InstanceBuilder::default()
+                .with_window(window)
                 .with_app_name_and_version(Self::window_title().as_str(), 0)
                 .with_engine_name_and_version("No Engine", 0)
                 .with_vulkan_api_version(VulkanApiVersion::V1_0)
@@ -163,6 +164,14 @@ macro_rules! window_fns {
 
         fn window(&self) -> &Window {
             &self.window
+        }
+
+        fn last_frame_time_stamp(&self) -> SystemTime {
+            self.last_frame_time_stamp
+        }
+
+        fn camera(&mut self) -> &mut Camera {
+            &mut self.camera
         }
     };
 }

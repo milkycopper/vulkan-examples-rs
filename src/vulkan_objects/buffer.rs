@@ -168,27 +168,6 @@ impl<T> Drop for Buffer<T> {
     }
 }
 
-impl<T: core::fmt::Debug + bytemuck::Pod> core::fmt::Debug for Buffer<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            let size = self.size_in_bytes;
-            let data_ptr = self
-                .device
-                .map_memory(self.device_momory, 0, size, vk::MemoryMapFlags::default())
-                .unwrap();
-            let host_vec = vec![u8::default(); size as usize];
-            std::ptr::copy_nonoverlapping(
-                data_ptr as *const u8,
-                host_vec.as_ptr() as *mut u8,
-                size as usize,
-            );
-            self.device.unmap_memory(self.device_momory);
-            let host_vec_casted = bytemuck::cast_slice::<u8, T>(&host_vec);
-            write!(f, "{:?}", host_vec_casted)
-        }
-    }
-}
-
 pub mod memory_helper {
     use super::*;
 

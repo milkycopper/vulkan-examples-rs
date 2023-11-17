@@ -22,7 +22,7 @@ struct DrawTriangleApp {
     window_resized: bool,
 
     current_frame: usize,
-    last_time: SystemTime,
+    last_frame_time_stamp: SystemTime,
 
     camera: Camera,
 
@@ -164,7 +164,7 @@ impl WindowApp for DrawTriangleApp {
             pipeline_layout,
             pipeline,
             current_frame: 0,
-            last_time: SystemTime::now(),
+            last_frame_time_stamp: SystemTime::now(),
             camera: Camera::with_translation(Vec3::new(0., 0., -3.))
                 .with_move_speed(100.)
                 .with_rotate_speed(400.),
@@ -191,9 +191,7 @@ impl WindowApp for DrawTriangleApp {
 
             match result {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    self.fixed_vulkan_stuff
-                        .recreate_swapchain(&self.window)
-                        .unwrap();
+                    self.fixed_vulkan_stuff.recreate(&self.window).unwrap();
                     return;
                 }
                 Ok(_) => {}
@@ -249,22 +247,12 @@ impl WindowApp for DrawTriangleApp {
             };
             if need_recreate || self.window_resized {
                 self.window_resized = false;
-                self.fixed_vulkan_stuff
-                    .recreate_swapchain(&self.window)
-                    .unwrap();
+                self.fixed_vulkan_stuff.recreate(&self.window).unwrap();
             }
         };
 
         self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
-        self.last_time = SystemTime::now();
-    }
-
-    fn time_stamp(&self) -> SystemTime {
-        self.last_time
-    }
-
-    fn camera(&mut self) -> &mut Camera {
-        &mut self.camera
+        self.last_frame_time_stamp = SystemTime::now();
     }
 }
 

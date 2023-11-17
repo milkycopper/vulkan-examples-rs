@@ -30,13 +30,11 @@ impl FixedVulkanStuff {
     pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
     pub fn new(window: &Window, instance: Rc<Instance>) -> RenderResult<Self> {
-        let surface = Rc::new(Surface::new(
-            window,
-            instance.clone(),
-            Surface::DEFAULT_FORMAT,
+        let surface = Rc::new(Surface::new_with_default_format(window, instance.clone())?);
+        let device = Rc::new(Device::new_with_queue_loaded(
+            instance,
+            QueueInfo::from_surface(&surface)?,
         )?);
-        let queue_info = QueueInfo::from_surface(&surface)?;
-        let device = Rc::new(Device::new_with_queue_loaded(instance, queue_info)?);
         let swapchain_batch = SwapChainBatch::new(surface.clone(), device.clone())?;
         let command_pool = {
             let create_info = vk::CommandPoolCreateInfo::builder()
@@ -62,12 +60,10 @@ impl FixedVulkanStuff {
             array_init::try_array_init(|_| unsafe {
                 device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
             })?;
-
         let render_finished_semaphores: [_; Self::MAX_FRAMES_IN_FLIGHT] =
             array_init::try_array_init(|_| unsafe {
                 device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
             })?;
-
         let in_flight_fences: [_; Self::MAX_FRAMES_IN_FLIGHT] =
             array_init::try_array_init(|_| unsafe {
                 device.create_fence(
@@ -105,7 +101,7 @@ impl FixedVulkanStuff {
         })
     }
 
-    pub fn recreate_swapchain(&mut self, window: &Window) -> RenderResult<()> {
+    pub fn recreate(&mut self, window: &Window) -> RenderResult<()> {
         unsafe {
             self.device.device_wait_idle()?;
             self.surface.refit_surface_attribute(window)?;

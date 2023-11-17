@@ -22,7 +22,7 @@ struct VikingRoomApp {
     window_resized: bool,
 
     current_frame: usize,
-    last_time: SystemTime,
+    last_frame_time_stamp: SystemTime,
 
     model_vertices: Vec<Vertex>,
     model_indices: Vec<u32>,
@@ -64,9 +64,7 @@ impl WindowApp for VikingRoomApp {
 
             match result {
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    self.fixed_vulkan_stuff
-                        .recreate_swapchain(&self.window)
-                        .unwrap();
+                    self.fixed_vulkan_stuff.recreate(&self.window).unwrap();
                     return;
                 }
                 Ok(_) => {}
@@ -123,14 +121,12 @@ impl WindowApp for VikingRoomApp {
             };
             if need_recreate || self.window_resized {
                 self.window_resized = false;
-                self.fixed_vulkan_stuff
-                    .recreate_swapchain(&self.window)
-                    .unwrap();
+                self.fixed_vulkan_stuff.recreate(&self.window).unwrap();
             }
         };
 
         self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
-        self.last_time = SystemTime::now();
+        self.last_frame_time_stamp = SystemTime::now();
     }
 
     fn new(event_loop: &EventLoop<()>) -> Self {
@@ -241,7 +237,7 @@ impl WindowApp for VikingRoomApp {
                 (buffer, ptr)
             });
 
-        let texture_image = ImageBuffer::color_image_from_file(
+        let texture_image = ImageBuffer::rgba8_image_from_file(
             "examples/textures/viking_room/viking_room.png",
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
@@ -296,7 +292,7 @@ impl WindowApp for VikingRoomApp {
             window_resized: false,
 
             current_frame: 0,
-            last_time: SystemTime::now(),
+            last_frame_time_stamp: SystemTime::now(),
 
             model_vertices,
             model_indices,
@@ -317,14 +313,6 @@ impl WindowApp for VikingRoomApp {
             texture_image_view,
             texture_image_sampler,
         }
-    }
-
-    fn time_stamp(&self) -> SystemTime {
-        self.last_time
-    }
-
-    fn camera(&mut self) -> &mut Camera {
-        &mut self.camera
     }
 }
 
