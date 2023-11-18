@@ -48,82 +48,36 @@ impl WindowApp for VikingRoomApp {
     window_fns!(VikingRoomApp);
 
     fn draw_frame(&mut self) {
-        unsafe {
-            self.fixed_vulkan_stuff
-                .device
-                .wait_for_fences(
-                    &[self.fixed_vulkan_stuff.in_flight_fences[self.current_frame]],
-                    true,
-                    u64::MAX,
-                )
+        let image_index = {
+            let ret = self
+                .fixed_vulkan_stuff
+                .frame_get_image_index_to_draw(self.current_frame, &self.window)
                 .unwrap();
-
-            let result = self.fixed_vulkan_stuff.swapchain_batch.acquire_next_image(
-                self.fixed_vulkan_stuff.image_available_semaphores[self.current_frame],
-            );
-
-            match result {
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    self.fixed_vulkan_stuff.recreate(&self.window).unwrap();
-                    return;
-                }
-                Ok(_) => {}
-                _ => panic!("Failed to acquire swap chain image"),
+            if ret.1 {
+                return;
             }
-
-            let image_index = result.unwrap().0;
-
-            self.update_uniform_buffer(&self.camera, &self.uniform_buffers[self.current_frame]);
-
-            self.fixed_vulkan_stuff
-                .device
-                .reset_fences(&[self.fixed_vulkan_stuff.in_flight_fences[self.current_frame]])
-                .unwrap();
-
-            self.record_render_commands(
-                self.fixed_vulkan_stuff.command_buffers[self.current_frame],
-                self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
-                self.descriptor_sets[self.current_frame],
-                self.model_vertices.len() as u32,
-                self.model_indices.len() as u32,
-            );
-
-            let submit_info = vk::SubmitInfo::builder()
-                .wait_semaphores(&[
-                    self.fixed_vulkan_stuff.image_available_semaphores[self.current_frame]
-                ])
-                .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-                .command_buffers(&[self.fixed_vulkan_stuff.command_buffers[self.current_frame]])
-                .signal_semaphores(&[
-                    self.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]
-                ])
-                .build();
-
-            self.fixed_vulkan_stuff
-                .device
-                .queue_submit(
-                    self.fixed_vulkan_stuff.device.graphic_queue(),
-                    &[submit_info],
-                    self.fixed_vulkan_stuff.in_flight_fences[self.current_frame],
-                )
-                .unwrap();
-
-            let result = self.fixed_vulkan_stuff.swapchain_batch.queue_present(
-                image_index,
-                &[self.fixed_vulkan_stuff.render_finished_semaphores[self.current_frame]],
-                &self.fixed_vulkan_stuff.device.graphic_queue(),
-            );
-
-            let need_recreate = match result {
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => true,
-                Ok(_) => false,
-                _ => panic!("Failed to present swap chain image"),
-            };
-            if need_recreate || self.window_resized {
-                self.window_resized = false;
-                self.fixed_vulkan_stuff.recreate(&self.window).unwrap();
-            }
+            ret.0
         };
+
+        self.update_uniform_buffer(&self.camera, &self.uniform_buffers[self.current_frame]);
+
+        self.record_render_commands(
+            self.fixed_vulkan_stuff.command_buffers[self.current_frame],
+            self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
+            self.descriptor_sets[self.current_frame],
+            self.model_vertices.len() as u32,
+            self.model_indices.len() as u32,
+        );
+
+        self.window_resized = self
+            .fixed_vulkan_stuff
+            .frame_queue_submit_and_present(
+                self.current_frame,
+                image_index,
+                &self.window,
+                self.window_resized,
+            )
+            .unwrap();
 
         self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
         self.last_frame_time_stamp = SystemTime::now();

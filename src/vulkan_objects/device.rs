@@ -15,7 +15,49 @@ pub struct Device {
 }
 
 impl Device {
-    fn new(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
+    pub fn new(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
+        let mut device = Self::new_with_queue_info(instance, queue_info)?;
+        device.fill_queue_info();
+        Ok(device)
+    }
+
+    pub fn instance(&self) -> &Rc<Instance> {
+        &self.instance
+    }
+
+    pub fn physical_device(&self) -> &Weak<vk::PhysicalDevice> {
+        &self.physical_device
+    }
+
+    pub fn queue_family_indices(&self) -> Vec<u32> {
+        self.queue_info
+            .merge_queue_family_index_and_priority()
+            .iter()
+            .map(|x| x.0)
+            .collect()
+    }
+
+    pub fn queue_info(&self) -> &QueueInfo {
+        &self.queue_info
+    }
+
+    pub fn graphic_queue(&self) -> vk::Queue {
+        self.queue_info.graphic_queue.unwrap()
+    }
+
+    pub fn present_queue(&self) -> vk::Queue {
+        self.queue_info.present_queue.unwrap()
+    }
+
+    pub fn graphic_queue_family_index(&self) -> u32 {
+        self.queue_info.graphic_family_index_priority.0
+    }
+
+    pub fn present_queue_family_index(&self) -> u32 {
+        self.queue_info.present_family_index_priority.0
+    }
+
+    fn new_with_queue_info(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
         let physical_device = instance.pick_physical_device();
         Ok(Self {
             inner: {
@@ -61,55 +103,13 @@ impl Device {
         })
     }
 
-    pub fn fill_queue_info(&mut self) {
+    fn fill_queue_info(&mut self) {
         unsafe {
             self.queue_info.graphic_queue =
                 Some(self.get_device_queue(self.queue_info.graphic_family_index_priority.0, 0));
             self.queue_info.present_queue =
                 Some(self.get_device_queue(self.queue_info.present_family_index_priority.0, 0));
         };
-    }
-
-    pub fn new_with_queue_loaded(instance: Rc<Instance>, queue_info: QueueInfo) -> VkResult<Self> {
-        let mut device = Self::new(instance, queue_info)?;
-        device.fill_queue_info();
-        Ok(device)
-    }
-
-    pub fn instance(&self) -> &Rc<Instance> {
-        &self.instance
-    }
-
-    pub fn physical_device(&self) -> &Weak<vk::PhysicalDevice> {
-        &self.physical_device
-    }
-
-    pub fn queue_family_indices(&self) -> Vec<u32> {
-        self.queue_info
-            .merge_queue_family_index_and_priority()
-            .iter()
-            .map(|x| x.0)
-            .collect()
-    }
-
-    pub fn queue_info(&self) -> &QueueInfo {
-        &self.queue_info
-    }
-
-    pub fn graphic_queue(&self) -> vk::Queue {
-        self.queue_info.graphic_queue.unwrap()
-    }
-
-    pub fn present_queue(&self) -> vk::Queue {
-        self.queue_info.present_queue.unwrap()
-    }
-
-    pub fn graphic_queue_family_index(&self) -> u32 {
-        self.queue_info.graphic_family_index_priority.0
-    }
-
-    pub fn present_queue_family_index(&self) -> u32 {
-        self.queue_info.present_family_index_priority.0
     }
 }
 

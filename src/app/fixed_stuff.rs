@@ -4,12 +4,18 @@ use ash::{prelude::VkResult, vk};
 use winit::window::Window;
 
 use crate::{
-    error::RenderResult,
+    error::{RenderError, RenderResult},
     vulkan_objects::{
         format_helper, DepthStencilImageAndView, Device, Instance, QueueInfo, Surface,
         SwapChainBatch,
     },
 };
+
+pub struct FrameSyncPrimitive {
+    pub in_flight_fence: vk::Fence,
+    pub image_available_semaphore: vk::Semaphore,
+    pub render_finished_semaphore: vk::Semaphore,
+}
 
 pub struct FixedVulkanStuff {
     pub surface: Rc<Surface>,
@@ -18,12 +24,9 @@ pub struct FixedVulkanStuff {
     pub swapchain_framebuffers: Vec<vk::Framebuffer>,
     pub command_pool: vk::CommandPool,
     pub command_buffers: [vk::CommandBuffer; Self::MAX_FRAMES_IN_FLIGHT],
-    pub image_available_semaphores: [vk::Semaphore; Self::MAX_FRAMES_IN_FLIGHT],
-    pub render_finished_semaphores: [vk::Semaphore; Self::MAX_FRAMES_IN_FLIGHT],
-    pub in_flight_fences: [vk::Fence; Self::MAX_FRAMES_IN_FLIGHT],
+    pub frame_sync_primitives: [FrameSyncPrimitive; Self::MAX_FRAMES_IN_FLIGHT],
     pub depth_image_and_view: DepthStencilImageAndView,
     pub render_pass: vk::RenderPass,
-    pub depth_format: vk::Format,
 }
 
 impl FixedVulkanStuff {
@@ -31,10 +34,7 @@ impl FixedVulkanStuff {
 
     pub fn new(window: &Window, instance: Rc<Instance>) -> RenderResult<Self> {
         let surface = Rc::new(Surface::new_with_default_format(window, instance.clone())?);
-        let device = Rc::new(Device::new_with_queue_loaded(
-            instance,
-            QueueInfo::from_surface(&surface)?,
-        )?);
+        let device = Rc::new(Device::new(instance, QueueInfo::from_surface(&surface)?)?);
         let swapchain_batch = SwapChainBatch::new(surface.clone(), device.clone())?;
         let command_pool = {
             let create_info = vk::CommandPoolCreateInfo::builder()
@@ -56,27 +56,28 @@ impl FixedVulkanStuff {
                     .unwrap()
             }
         };
-        let image_available_semaphores: [_; Self::MAX_FRAMES_IN_FLIGHT] =
-            array_init::try_array_init(|_| unsafe {
-                device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-            })?;
-        let render_finished_semaphores: [_; Self::MAX_FRAMES_IN_FLIGHT] =
-            array_init::try_array_init(|_| unsafe {
-                device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-            })?;
-        let in_flight_fences: [_; Self::MAX_FRAMES_IN_FLIGHT] =
-            array_init::try_array_init(|_| unsafe {
-                device.create_fence(
-                    &vk::FenceCreateInfo::builder()
-                        .flags(vk::FenceCreateFlags::SIGNALED)
-                        .build(),
-                    None,
-                )
+        let frame_sync_primitives: [_; Self::MAX_FRAMES_IN_FLIGHT] =
+            array_init::try_array_init(|_| -> Result<_, vk::Result> {
+                Ok(unsafe {
+                    FrameSyncPrimitive {
+                        in_flight_fence: device.create_fence(
+                            &vk::FenceCreateInfo::builder()
+                                .flags(vk::FenceCreateFlags::SIGNALED)
+                                .build(),
+                            None,
+                        )?,
+                        render_finished_semaphore: device
+                            .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?,
+                        image_available_semaphore: device
+                            .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?,
+                    }
+                })
             })?;
         let depth_format = format_helper::find_depth_format(&device)?;
         let depth_image_and_view =
             DepthStencilImageAndView::new(surface.extent(), depth_format, device.clone())?;
-        let render_pass = create_renderpass(surface.format(), depth_format, &device)?;
+        let render_pass =
+            create_renderpass(surface.format(), depth_image_and_view.format(), &device)?;
         let swapchain_framebuffers = create_swapchain_frame_buffer(
             &swapchain_batch,
             &render_pass,
@@ -91,13 +92,10 @@ impl FixedVulkanStuff {
             swapchain_batch,
             command_pool,
             command_buffers,
-            image_available_semaphores,
-            render_finished_semaphores,
-            in_flight_fences,
+            frame_sync_primitives,
             depth_image_and_view,
             render_pass,
             swapchain_framebuffers,
-            depth_format,
         })
     }
 
@@ -108,7 +106,7 @@ impl FixedVulkanStuff {
             self.swapchain_batch.recreate()?;
             self.depth_image_and_view = DepthStencilImageAndView::new(
                 self.surface.extent(),
-                self.depth_format,
+                self.depth_image_and_view.format(),
                 self.device.clone(),
             )?;
             self.swapchain_framebuffers
@@ -124,21 +122,105 @@ impl FixedVulkanStuff {
             Ok(())
         }
     }
+
+    pub fn frame_wait_for_fence(&self, frame_index: usize) -> VkResult<()> {
+        unsafe {
+            self.device.wait_for_fences(
+                &[self.frame_sync_primitives[frame_index].in_flight_fence],
+                true,
+                u64::MAX,
+            )
+        }
+    }
+
+    pub fn frame_acquire_next_image(&self, frame_index: usize) -> VkResult<(u32, bool)> {
+        self.swapchain_batch
+            .acquire_next_image(self.frame_sync_primitives[frame_index].image_available_semaphore)
+    }
+
+    pub fn frame_reset_fence(&self, frame_index: usize) -> VkResult<()> {
+        unsafe {
+            self.device
+                .reset_fences(&[self.frame_sync_primitives[frame_index].in_flight_fence])
+        }
+    }
+
+    pub fn frame_draw_queue_submit(&self, frame_index: usize) -> VkResult<()> {
+        let submit_info = vk::SubmitInfo::builder()
+            .wait_semaphores(&[self.frame_sync_primitives[frame_index].image_available_semaphore])
+            .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+            .command_buffers(&[self.command_buffers[frame_index]])
+            .signal_semaphores(&[self.frame_sync_primitives[frame_index].render_finished_semaphore])
+            .build();
+
+        unsafe {
+            self.device.queue_submit(
+                self.device.graphic_queue(),
+                &[submit_info],
+                self.frame_sync_primitives[frame_index].in_flight_fence,
+            )
+        }
+    }
+
+    pub fn frame_queue_present(&self, frame_index: usize, image_index: u32) -> VkResult<bool> {
+        self.swapchain_batch.queue_present(
+            image_index,
+            &[self.frame_sync_primitives[frame_index].render_finished_semaphore],
+            &self.device.graphic_queue(),
+        )
+    }
+
+    pub fn frame_get_image_index_to_draw(
+        &mut self,
+        frame_index: usize,
+        window: &Window,
+    ) -> RenderResult<(u32, bool)> {
+        self.frame_wait_for_fence(frame_index)?;
+        let result = self.frame_acquire_next_image(frame_index);
+        match result {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.recreate(window)?;
+                return Ok((u32::MAX, true));
+            }
+            Ok(_) => {}
+            Err(e) => return Err(RenderError::VkResult(e)),
+        }
+        self.frame_reset_fence(frame_index)?;
+        Ok((result?.0, false))
+    }
+
+    pub fn frame_queue_submit_and_present(
+        &mut self,
+        frame_index: usize,
+        image_index: u32,
+        window: &Window,
+        window_resized: bool,
+    ) -> RenderResult<bool> {
+        self.frame_draw_queue_submit(frame_index)?;
+        let result = self.frame_queue_present(frame_index, image_index);
+        let need_recreate = match result {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true) => true,
+            Ok(_) => false,
+            Err(e) => return Err(RenderError::VkResult(e)),
+        };
+        if need_recreate || window_resized {
+            self.recreate(window)?;
+        };
+
+        Ok(false)
+    }
 }
 
 impl Drop for FixedVulkanStuff {
     fn drop(&mut self) {
         unsafe {
-            [
-                self.image_available_semaphores,
-                self.render_finished_semaphores,
-            ]
-            .concat()
-            .into_iter()
-            .for_each(|sm| self.device.destroy_semaphore(sm, None));
-            self.in_flight_fences
-                .into_iter()
-                .for_each(|fence| self.device.destroy_fence(fence, None));
+            self.frame_sync_primitives.iter().for_each(|fsp| {
+                self.device
+                    .destroy_semaphore(fsp.image_available_semaphore, None);
+                self.device
+                    .destroy_semaphore(fsp.render_finished_semaphore, None);
+                self.device.destroy_fence(fsp.in_flight_fence, None)
+            });
             self.device.destroy_command_pool(self.command_pool, None);
             self.swapchain_framebuffers
                 .iter()
