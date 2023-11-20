@@ -21,13 +21,12 @@ pub struct Surface {
     attributes: RefCell<SurfaceAttributes>,
     loader: SurfaceLoader,
     inner: vk::SurfaceKHR,
+    /// Ensure [`Surface`] is dropped before [`Instance`]
     instance: Rc<Instance>,
     physical_device: Weak<vk::PhysicalDevice>,
 }
 
 impl Surface {
-    pub const DEFAULT_FORMAT: vk::Format = vk::Format::B8G8R8A8_SRGB;
-
     pub fn new(window: &Window, instance: Rc<Instance>, format: vk::Format) -> RenderResult<Self> {
         let surface_khr = unsafe {
             ash_window::create_surface(
@@ -55,10 +54,6 @@ impl Surface {
             physical_device,
             instance,
         })
-    }
-
-    pub fn new_with_default_format(window: &Window, instance: Rc<Instance>) -> RenderResult<Self> {
-        Self::new(window, instance, Self::DEFAULT_FORMAT)
     }
 
     pub fn format(&self) -> vk::Format {

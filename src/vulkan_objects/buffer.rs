@@ -6,11 +6,13 @@ use super::{Device, OneTimeCommand};
 use crate::error::{RenderError, RenderResult};
 
 pub struct Buffer<T> {
-    size_in_bytes: vk::DeviceSize,
     buffer: vk::Buffer,
     device_momory: vk::DeviceMemory,
+    size_in_bytes: vk::DeviceSize,
+    alignment: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
+    mapped_ptr: Option<*mut c_void>,
     device: Rc<Device>,
     phantom: PhantomData<T>,
 }
@@ -45,11 +47,13 @@ impl<T> Buffer<T> {
             device.bind_buffer_memory(buffer, device_momory, 0)?;
 
             Ok(Self {
-                size_in_bytes,
                 buffer,
                 device_momory,
+                size_in_bytes,
+                alignment: memory_requirements.alignment,
                 usage,
                 properties,
+                mapped_ptr: None,
                 device,
                 phantom: PhantomData::<T>,
             })
@@ -84,6 +88,69 @@ impl<T> Buffer<T> {
         self.properties
     }
 
+    pub fn alignment(&self) -> vk::DeviceSize {
+        self.alignment
+    }
+
+    pub fn mapped(&self) -> bool {
+        self.mapped_ptr.is_some()
+    }
+
+    pub fn descriptor(
+        &self,
+        offset: vk::DeviceSize,
+        range: vk::DeviceSize,
+    ) -> vk::DescriptorBufferInfo {
+        vk::DescriptorBufferInfo::builder()
+            .buffer(self.buffer)
+            .offset(offset)
+            .range(range)
+            .build()
+    }
+
+    pub fn descriptor_default(&self) -> vk::DescriptorBufferInfo {
+        self.descriptor(0, self.size_in_bytes)
+    }
+
+    pub fn map_memory(
+        &mut self,
+        offset: vk::DeviceSize,
+        size_in_bytes: vk::DeviceSize,
+    ) -> VkResult<*mut c_void> {
+        assert!(!self.mapped());
+        assert!(offset + size_in_bytes <= self.size_in_bytes);
+        unsafe {
+            let ptr = self.device.map_memory(
+                self.device_momory,
+                offset,
+                size_in_bytes,
+                vk::MemoryMapFlags::default(),
+            )?;
+            self.mapped_ptr = Some(ptr);
+            Ok(ptr)
+        }
+    }
+
+    pub fn map_memory_all(&mut self) -> VkResult<*mut c_void> {
+        self.map_memory(0, self.size_in_bytes)
+    }
+
+    pub fn unmap_memory(&mut self) {
+        assert!(self.mapped());
+        unsafe { self.device.unmap_memory(self.device_momory) };
+        self.mapped_ptr.take();
+    }
+
+    pub fn load_data(&mut self, data: &[T]) -> VkResult<()> {
+        assert!(data.len() as u64 * Self::element_size_in_bytes() == self.size_in_bytes);
+        unsafe {
+            let mapped_ptr = self.map_memory_all()?;
+            std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr as *mut T, data.len());
+            self.unmap_memory();
+        }
+        Ok(())
+    }
+
     pub fn copy_to<V>(
         &self,
         dst: &Buffer<V>,
@@ -95,7 +162,7 @@ impl<T> Buffer<T> {
         OneTimeCommand::new(self.device.clone(), command_pool)?.take_and_execute(
             |command| unsafe {
                 self.device.cmd_copy_buffer(
-                    *command.vk_command_buffer(),
+                    *command.command_buffer(),
                     self.buffer,
                     dst.buffer,
                     &[vk::BufferCopy::builder().size(self.size_in_bytes).build()],
@@ -108,54 +175,34 @@ impl<T> Buffer<T> {
         Ok(())
     }
 
-    pub fn new_indice_buffer(
-        indice_data: &Vec<T>,
+    pub fn new_device_local(
+        data: &[T],
         device: Rc<Device>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RenderResult<Self> {
-        let indice_num = indice_data.len();
+        let element_num = data.len();
 
-        let staging_buffer = Buffer::<T>::new(
-            indice_num,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            device.clone(),
-        )?;
+        let staging_buffer = {
+            let mut buffer = Buffer::<T>::new(
+                element_num,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                device.clone(),
+            )?;
+            buffer.load_data(data)?;
+            buffer
+        };
 
-        let indice_buffer = Buffer::<T>::new(
-            indice_num,
+        let device_local_buffer = Buffer::<T>::new(
+            element_num,
             vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             device.clone(),
         )?;
+        staging_buffer.copy_to(&device_local_buffer, command_pool, queue)?;
 
-        unsafe {
-            let data_ptr = device.map_memory(
-                staging_buffer.device_momory(),
-                0,
-                staging_buffer.size_in_bytes(),
-                vk::MemoryMapFlags::default(),
-            )?;
-            std::ptr::copy_nonoverlapping(indice_data.as_ptr(), data_ptr as *mut T, indice_num);
-            device.unmap_memory(staging_buffer.device_momory());
-        }
-
-        staging_buffer.copy_to(&indice_buffer, command_pool, queue)?;
-
-        Ok(indice_buffer)
-    }
-
-    pub fn uniform_mapped_ptr(&self) -> VkResult<*mut c_void> {
-        assert!(self.usage == vk::BufferUsageFlags::UNIFORM_BUFFER);
-        Ok(unsafe {
-            self.device.map_memory(
-                self.device_momory,
-                0,
-                self.size_in_bytes,
-                vk::MemoryMapFlags::default(),
-            )?
-        })
+        Ok(device_local_buffer)
     }
 }
 

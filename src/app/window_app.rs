@@ -14,7 +14,7 @@ use crate::{
     camera::Camera,
     error::RenderResult,
     transforms::Direction,
-    vulkan_objects::{InstanceBuilder, VulkanApiVersion},
+    vulkan_objects::{Instance, VulkanApiVersion},
 };
 
 pub struct ClearValue {
@@ -138,12 +138,12 @@ pub trait WindowApp {
 
     fn create_fixed_vulkan_stuff(window: &Window) -> RenderResult<FixedVulkanStuff> {
         let instance = Rc::new(
-            InstanceBuilder::default()
-                .with_window(window)
-                .with_app_name_and_version(Self::window_title().as_str(), 0)
-                .with_engine_name_and_version("No Engine", 0)
-                .with_vulkan_api_version(VulkanApiVersion::V1_0)
-                .enable_validation_layer()
+            Instance::builder()
+                .window(window)
+                .app_name_and_version(Self::window_title().as_str(), 0)
+                .engine_name_and_version("No Engine", 0)
+                .vulkan_api_version(VulkanApiVersion::V1_0)
+                .enable_validation_layer(true)
                 .build()
                 .unwrap(),
         );

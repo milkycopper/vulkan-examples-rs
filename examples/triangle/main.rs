@@ -115,8 +115,8 @@ impl WindowApp for DrawTriangleApp {
         )
         .unwrap();
 
-        let indice_buffer = Buffer::new_indice_buffer(
-            &vec![0, 1, 2, 1, 0, 2],
+        let indice_buffer = Buffer::new_device_local(
+            &[0, 1, 2, 1, 0, 2],
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
@@ -125,19 +125,15 @@ impl WindowApp for DrawTriangleApp {
 
         let uniform_buffers: [_; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
             array_init::array_init(|_| {
-                let buffer =
+                let mut buffer =
                     MVPMatrix::empty_uniform_buffer(fixed_vulkan_stuff.device.clone()).unwrap();
-                let ptr = buffer.uniform_mapped_ptr().unwrap();
+                let ptr = buffer.map_memory_all().unwrap();
                 (buffer, ptr)
             });
 
         {
             for i in 0..FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT {
-                let uniform_buffer_info = vk::DescriptorBufferInfo::builder()
-                    .buffer(uniform_buffers[i].0.buffer())
-                    .offset(0)
-                    .range(std::mem::size_of::<MVPMatrix>() as u64)
-                    .build();
+                let uniform_buffer_info = uniform_buffers[i].0.descriptor_default();
                 let uniform_descritptor_write = vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets[i])
                     .dst_binding(0)

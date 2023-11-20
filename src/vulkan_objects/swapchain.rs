@@ -59,6 +59,8 @@ impl SwapChainBatch {
         wait_semaphores: &[vk::Semaphore],
         queue: &vk::Queue,
     ) -> VkResult<bool> {
+        assert!((image_index as usize) < self.images.len());
+
         let present_info_khr = vk::PresentInfoKHR::builder()
             .wait_semaphores(wait_semaphores)
             .swapchains(&[self.swapchain])
@@ -107,21 +109,21 @@ fn create_swapchain_image_and_views(
 ) -> VkResult<(vk::SwapchainKHR, Vec<vk::Image>, Vec<vk::ImageView>)> {
     let swapchain = create_swapchain(loader, surface, &device.queue_family_indices())?;
     let images = unsafe { loader.get_swapchain_images(swapchain)? };
+
     let mut image_views = vec![];
+    let subresource_range = vk::ImageSubresourceRange::builder()
+        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .base_mip_level(0)
+        .level_count(1)
+        .base_array_layer(0)
+        .layer_count(1)
+        .build();
     for image in &images {
         let create_info = vk::ImageViewCreateInfo::builder()
             .image(*image)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(surface.format())
-            .subresource_range(
-                vk::ImageSubresourceRange::builder()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1)
-                    .build(),
-            )
+            .subresource_range(subresource_range)
             .build();
         image_views.push(unsafe { device.create_image_view(&create_info, None)? })
     }
@@ -156,7 +158,7 @@ fn create_swapchain(
         .pre_transform(surface.capabilities().current_transform)
         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
         .present_mode(surface.present_mode())
-        .clipped(false)
+        .clipped(true)
         .old_swapchain(vk::SwapchainKHR::null())
         .build();
 

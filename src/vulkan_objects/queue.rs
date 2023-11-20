@@ -7,12 +7,17 @@ use crate::error::{RenderError, RenderResult};
 pub struct QueueInfo {
     pub graphic_family_index_priority: (u32, f32),
     pub present_family_index_priority: (u32, f32),
-    pub graphic_queue: Option<vk::Queue>,
-    pub present_queue: Option<vk::Queue>,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct QueueWithInfo {
+    pub info: QueueInfo,
+    pub graphic_queue: vk::Queue,
+    pub present_queue: vk::Queue,
 }
 
 impl QueueInfo {
-    pub fn from_surface(surface: &Surface) -> RenderResult<Self> {
+    pub fn new(surface: &Surface) -> RenderResult<Self> {
         let mut queue_info = QueueInfo::default();
         let mut graphic_ok = false;
         let mut present_ok = false;

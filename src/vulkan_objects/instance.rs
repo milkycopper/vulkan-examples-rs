@@ -11,6 +11,9 @@ use winit::window::Window;
 
 use crate::error::{RenderError, RenderResult};
 
+const VALIDATION_LAYER_NAME: *const i8 =
+    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr() };
+
 #[derive(Clone, Copy, Debug)]
 pub enum VulkanApiVersion {
     V1_0,
@@ -55,30 +58,34 @@ impl<'a> Default for InstanceBuilder<'a> {
 }
 
 impl<'a> InstanceBuilder<'a> {
-    pub fn with_window(mut self, window: &'a Window) -> Self {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn window(mut self, window: &'a Window) -> Self {
         self.window = Some(window);
         self
     }
 
-    pub fn with_app_name_and_version(mut self, name: &'a str, version: u32) -> Self {
+    pub fn app_name_and_version(mut self, name: &'a str, version: u32) -> Self {
         self.app_name = Some(name);
         self.app_version = version;
         self
     }
 
-    pub fn with_engine_name_and_version(mut self, name: &'a str, version: u32) -> Self {
+    pub fn engine_name_and_version(mut self, name: &'a str, version: u32) -> Self {
         self.engine_name = Some(name);
         self.engine_version = version;
         self
     }
 
-    pub fn with_vulkan_api_version(mut self, version: VulkanApiVersion) -> Self {
+    pub fn vulkan_api_version(mut self, version: VulkanApiVersion) -> Self {
         self.vulkan_api_version = version;
         self
     }
 
-    pub fn enable_validation_layer(mut self) -> Self {
-        self.validation_layer_enabled = true;
+    pub fn enable_validation_layer(mut self, enabled: bool) -> Self {
+        self.validation_layer_enabled = enabled;
         self
     }
 
@@ -125,7 +132,7 @@ pub struct Instance {
 }
 
 impl Instance {
-    fn new(
+    pub fn new(
         application_name: Option<&str>,
         application_version: u32,
         engine_name: Option<&str>,
@@ -144,11 +151,10 @@ impl Instance {
             .api_version(vulkan_api_version.get_u32_version())
             .build();
 
-        let mut layer_names = vec![];
-        if validation_layer_enabled {
-            layer_names.push(unsafe {
-                CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()
-            })
+        let layer_names = if validation_layer_enabled {
+            vec![VALIDATION_LAYER_NAME]
+        } else {
+            vec![]
         };
 
         #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -222,6 +228,10 @@ impl Instance {
         })
     }
 
+    pub fn builder<'a>() -> InstanceBuilder<'a> {
+        InstanceBuilder::default()
+    }
+
     pub fn entry(&self) -> &Entry {
         &self.entry
     }
@@ -256,8 +266,8 @@ impl Deref for Instance {
 
 impl Drop for Instance {
     fn drop(&mut self) {
+        self.physical_devices.check_can_be_freed();
         unsafe {
-            self.physical_devices.check_can_be_freed();
             if let Some((debug_utils, debug_messenger)) = self.debug_worker.as_ref() {
                 debug_utils.destroy_debug_utils_messenger(*debug_messenger, None)
             }
@@ -302,15 +312,15 @@ struct PhysicalDeviceCollection {
 }
 
 impl PhysicalDeviceCollection {
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.discrete.is_empty() && self.integrated.is_empty() && self.cpu.is_empty()
     }
 
-    pub fn pick_first(&self) -> Option<Rc<vk::PhysicalDevice>> {
+    fn pick_first(&self) -> Option<Rc<vk::PhysicalDevice>> {
         self.chained_iter().next().map(Clone::clone)
     }
 
-    pub fn check_can_be_freed(&self) {
+    fn check_can_be_freed(&self) {
         self.chained_iter()
             .for_each(|pd| assert!(Rc::strong_count(pd) == 1));
     }

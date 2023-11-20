@@ -13,7 +13,7 @@ use vulkan_example_rs::{
     camera::Camera,
     mesh::Vertex,
     transforms::MVPMatrix,
-    vulkan_objects::{extent_helper, image_helper, Buffer, Device, ImageBuffer, Surface},
+    vulkan_objects::{extent_helper, Buffer, Device, Surface, Texture},
     window_fns,
 };
 
@@ -39,9 +39,7 @@ struct VikingRoomApp {
     indice_buffer: Buffer<u32>,
     uniform_buffers: [(Buffer<MVPMatrix>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
     #[allow(dead_code)]
-    texture_image: ImageBuffer,
-    texture_image_view: vk::ImageView,
-    texture_image_sampler: vk::Sampler,
+    texture_image: Texture,
 }
 
 impl WindowApp for VikingRoomApp {
@@ -175,7 +173,7 @@ impl WindowApp for VikingRoomApp {
         )
         .unwrap();
 
-        let indice_buffer = Buffer::new_indice_buffer(
+        let indice_buffer = Buffer::new_device_local(
             &model_indices,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
@@ -185,51 +183,38 @@ impl WindowApp for VikingRoomApp {
 
         let uniform_buffers: [_; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
             array_init::array_init(|_| {
-                let buffer =
+                let mut buffer =
                     MVPMatrix::empty_uniform_buffer(fixed_vulkan_stuff.device.clone()).unwrap();
-                let ptr = buffer.uniform_mapped_ptr().unwrap();
+                let ptr = buffer.map_memory_all().unwrap();
                 (buffer, ptr)
             });
 
-        let texture_image = ImageBuffer::rgba8_image_from_file(
+        let mut texture_image = Texture::from_rgba8_picture(
             "examples/textures/viking_room/viking_room.png",
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
         )
         .unwrap();
-        let texture_image_sampler =
-            image_helper::create_texture_sampler(&fixed_vulkan_stuff.device).unwrap();
-        let texture_image_view = texture_image
-            .create_image_view(vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)
-            .unwrap();
+        texture_image.spawn_image_view().unwrap();
+        texture_image.spawn_sampler(vk::Filter::LINEAR).unwrap();
 
         {
             for i in 0..FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT {
-                let uniform_buffer_info = vk::DescriptorBufferInfo::builder()
-                    .buffer(uniform_buffers[i].0.buffer())
-                    .offset(0)
-                    .range(std::mem::size_of::<MVPMatrix>() as u64)
-                    .build();
                 let uniform_descritptor_write = vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets[i])
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&[uniform_buffer_info])
+                    .buffer_info(&[uniform_buffers[i].0.descriptor_default()])
                     .build();
 
-                let image_buffer_info = vk::DescriptorImageInfo::builder()
-                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                    .image_view(texture_image_view)
-                    .sampler(texture_image_sampler)
-                    .build();
                 let image_descritptor_write = vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets[i])
                     .dst_binding(1)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(&[image_buffer_info])
+                    .image_info(&[texture_image.descriptor_default()])
                     .build();
 
                 unsafe {
@@ -264,8 +249,6 @@ impl WindowApp for VikingRoomApp {
             indice_buffer,
             uniform_buffers,
             texture_image,
-            texture_image_view,
-            texture_image_sampler,
         }
     }
 }
@@ -389,12 +372,6 @@ impl Drop for VikingRoomApp {
     fn drop(&mut self) {
         unsafe {
             self.fixed_vulkan_stuff.device.device_wait_idle().unwrap();
-            self.fixed_vulkan_stuff
-                .device
-                .destroy_image_view(self.texture_image_view, None);
-            self.fixed_vulkan_stuff
-                .device
-                .destroy_sampler(self.texture_image_sampler, None);
             self.fixed_vulkan_stuff
                 .device
                 .destroy_pipeline(self.pipeline, None);

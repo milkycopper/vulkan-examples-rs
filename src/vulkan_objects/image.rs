@@ -6,38 +6,129 @@ use ash::{prelude::VkResult, vk};
 use super::{Buffer, Device, OneTimeCommand};
 use crate::error::{RenderError, RenderResult};
 
-pub struct ImageBuffer {
-    size_in_bytes: vk::DeviceSize,
-    image: vk::Image,
-    device_momory: vk::DeviceMemory,
+pub struct TextureBuilder {
+    width: u32,
+    height: u32,
+    extent_depth: u32,
+    layout: vk::ImageLayout,
+    mip_levels: u32,
+    array_layers: u32,
     format: vk::Format,
+    tiling: vk::ImageTiling,
+    usage: vk::ImageUsageFlags,
     device: Rc<Device>,
 }
 
-impl ImageBuffer {
+impl TextureBuilder {
     pub fn new(
         width: u32,
         height: u32,
         format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        device: Rc<Device>,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            extent_depth: 1,
+            layout: vk::ImageLayout::UNDEFINED,
+            mip_levels: 1,
+            array_layers: 1,
+            format,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage,
+            device,
+        }
+    }
+
+    pub fn extent_depth(mut self, depth: u32) -> Self {
+        self.extent_depth = depth;
+        self
+    }
+
+    pub fn mip_levels(mut self, mip_levels: u32) -> Self {
+        self.mip_levels = mip_levels;
+        self
+    }
+
+    pub fn array_layers(mut self, array_layers: u32) -> Self {
+        self.array_layers = array_layers;
+        self
+    }
+
+    pub fn image_layout(mut self, image_layout: vk::ImageLayout) -> Self {
+        self.layout = image_layout;
+        self
+    }
+
+    pub fn image_tiling(mut self, image_tiling: vk::ImageTiling) -> Self {
+        self.tiling = image_tiling;
+        self
+    }
+
+    pub fn build(&self) -> RenderResult<Texture> {
+        Texture::new(
+            self.width,
+            self.height,
+            self.extent_depth,
+            self.layout,
+            self.mip_levels,
+            self.array_layers,
+            self.format,
+            self.tiling,
+            self.usage,
+            self.device.clone(),
+        )
+    }
+}
+
+pub struct Texture {
+    size_in_bytes: vk::DeviceSize,
+    image: vk::Image,
+    device_momory: vk::DeviceMemory,
+    image_layout: vk::ImageLayout,
+    extent_2d: vk::Extent2D,
+    extent_depth: u32,
+    mip_levels: u32,
+    array_layers: u32,
+    format: vk::Format,
+    image_view: Option<Rc<vk::ImageView>>,
+    sampler: Option<Rc<vk::Sampler>>,
+    device: Rc<Device>,
+}
+
+impl Texture {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        width: u32,
+        height: u32,
+        extent_depth: u32,
+        layout: vk::ImageLayout,
+        mip_levels: u32,
+        array_layers: u32,
+        format: vk::Format,
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
-        memory_property: vk::MemoryPropertyFlags,
         device: Rc<Device>,
     ) -> RenderResult<Self> {
         let create_info = vk::ImageCreateInfo::builder()
-            .image_type(vk::ImageType::TYPE_2D)
+            .image_type(if extent_depth > 1 {
+                vk::ImageType::TYPE_3D
+            } else {
+                vk::ImageType::TYPE_2D
+            })
             .extent(
                 vk::Extent3D::builder()
                     .width(width)
                     .height(height)
-                    .depth(1)
+                    .depth(extent_depth)
                     .build(),
             )
-            .mip_levels(1)
-            .array_layers(1)
+            .mip_levels(mip_levels)
+            .array_layers(array_layers)
             .format(format)
             .tiling(tiling)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .initial_layout(layout)
             .usage(usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .samples(vk::SampleCountFlags::TYPE_1)
@@ -51,48 +142,134 @@ impl ImageBuffer {
                 .memory_type_index(super::memory_helper::find_memory_type(
                     &device,
                     &memory_requirement,
-                    memory_property,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
                 )?)
                 .build();
             let device_momory = device.allocate_memory(&memory_alloc_info, None)?;
 
             device.bind_image_memory(image, device_momory, 0)?;
 
-            Ok(ImageBuffer {
+            Ok(Texture {
                 size_in_bytes: memory_requirement.size,
                 image,
                 device_momory,
+                image_layout: layout,
+                extent_2d: vk::Extent2D::builder().width(width).height(height).build(),
+                extent_depth,
+                mip_levels,
+                array_layers,
                 format,
+                image_view: None,
+                sampler: None,
                 device,
             })
         }
+    }
+
+    pub fn builder(
+        width: u32,
+        height: u32,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        device: Rc<Device>,
+    ) -> TextureBuilder {
+        TextureBuilder::new(width, height, format, usage, device)
     }
 
     pub fn size_in_bytes(&self) -> vk::DeviceSize {
         self.size_in_bytes
     }
 
-    pub fn vk_image(&self) -> vk::Image {
-        self.image
+    pub fn image(&self) -> &vk::Image {
+        &self.image
+    }
+
+    pub fn device_memory(&self) -> &vk::DeviceMemory {
+        &self.device_momory
     }
 
     pub fn format(&self) -> vk::Format {
         self.format
     }
 
-    pub fn create_image_view(
+    pub fn extent2d(&self) -> vk::Extent2D {
+        self.extent_2d
+    }
+
+    pub fn layout(&self) -> vk::ImageLayout {
+        self.image_layout
+    }
+
+    pub fn image_view(&self) -> Option<Rc<vk::ImageView>> {
+        self.image_view.clone()
+    }
+
+    pub fn set_image_view(&mut self, image_view: Rc<vk::ImageView>) {
+        self.image_view = Some(image_view)
+    }
+
+    pub fn spawn_image_view(&mut self) -> VkResult<()> {
+        let image_view = {
+            let create_info = vk::ImageViewCreateInfo::builder()
+                .image(self.image)
+                .view_type(if self.extent_depth > 1 {
+                    vk::ImageViewType::TYPE_3D
+                } else {
+                    vk::ImageViewType::TYPE_2D
+                })
+                .format(self.format)
+                .subresource_range(
+                    vk::ImageSubresourceRange::builder()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_mip_level(0)
+                        .level_count(self.mip_levels)
+                        .base_array_layer(0)
+                        .layer_count(self.array_layers)
+                        .build(),
+                )
+                .build();
+            unsafe { self.device.create_image_view(&create_info, None)? }
+        };
+        self.set_image_view(Rc::new(image_view));
+        Ok(())
+    }
+
+    pub fn sampler(&self) -> Option<Rc<vk::Sampler>> {
+        self.sampler.clone()
+    }
+
+    pub fn set_sampler(&mut self, sampler: Rc<vk::Sampler>) {
+        self.sampler = Some(sampler)
+    }
+
+    pub fn spawn_sampler(&mut self, filter: vk::Filter) -> VkResult<()> {
+        self.set_sampler(Rc::new(image_helper::create_texture_sampler(
+            &self.device,
+            filter,
+        )?));
+        Ok(())
+    }
+
+    pub fn descriptor(
         &self,
-        format: vk::Format,
-        aspect_flags: vk::ImageAspectFlags,
-    ) -> VkResult<vk::ImageView> {
-        image_helper::create_image_view(self.image, format, aspect_flags, &self.device)
+        image_view: vk::ImageView,
+        sampler: vk::Sampler,
+    ) -> vk::DescriptorImageInfo {
+        vk::DescriptorImageInfo::builder()
+            .image_layout(self.layout())
+            .image_view(image_view)
+            .sampler(sampler)
+            .build()
+    }
+
+    pub fn descriptor_default(&self) -> vk::DescriptorImageInfo {
+        self.descriptor(*self.image_view().unwrap(), *self.sampler().unwrap())
     }
 
     pub fn transition_layout(
-        &self,
+        &mut self,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
-        aspect_flags: vk::ImageAspectFlags,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RenderResult<()> {
@@ -129,11 +306,11 @@ impl ImageBuffer {
             .image(self.image)
             .subresource_range(
                 vk::ImageSubresourceRange::builder()
-                    .aspect_mask(aspect_flags)
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .base_mip_level(0)
-                    .layer_count(1)
+                    .layer_count(self.array_layers)
                     .base_array_layer(0)
-                    .level_count(1)
+                    .level_count(self.mip_levels)
                     .build(),
             )
             .src_access_mask(src_access_mask)
@@ -143,7 +320,7 @@ impl ImageBuffer {
         OneTimeCommand::new(self.device.clone(), command_pool)?.take_and_execute(
             |command| unsafe {
                 self.device.cmd_pipeline_barrier(
-                    *command.vk_command_buffer(),
+                    *command.command_buffer(),
                     src_stage_mask,
                     dst_stage_mask,
                     vk::DependencyFlags::empty(),
@@ -155,11 +332,12 @@ impl ImageBuffer {
             },
             queue,
         )?;
+        self.image_layout = new_layout;
 
         Ok(())
     }
 
-    pub fn rgba8_image_from_file<P: AsRef<Path>>(
+    pub fn from_rgba8_picture<P: AsRef<Path>>(
         path: P,
         device: Rc<Device>,
         command_pool: &vk::CommandPool,
@@ -168,45 +346,29 @@ impl ImageBuffer {
         let image_data = image_loader::io::Reader::open(&path)?.decode()?.to_rgba8();
         let size = image_data.len();
 
-        let image_buffer = Self::new(
+        let mut texture = Self::builder(
             image_data.width(),
             image_data.height(),
             vk::Format::R8G8B8A8_SRGB,
-            vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
             device.clone(),
-        )?;
+        )
+        .build()?;
 
         let staging_buffer = {
-            let buffer = Buffer::<u8>::new(
+            let mut buffer = Buffer::<u8>::new(
                 size,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                 device.clone(),
             )?;
-
-            unsafe {
-                let data_ptr = device.map_memory(
-                    buffer.device_momory(),
-                    0,
-                    buffer.size_in_bytes(),
-                    vk::MemoryMapFlags::default(),
-                )?;
-                std::ptr::copy_nonoverlapping(
-                    image_data.to_vec().as_ptr(),
-                    data_ptr as *mut u8,
-                    size,
-                );
-                device.unmap_memory(buffer.device_momory());
-            };
+            buffer.load_data(&image_data)?;
             buffer
         };
 
-        image_buffer.transition_layout(
+        texture.transition_layout(
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageAspectFlags::COLOR,
             command_pool,
             queue,
         )?;
@@ -233,9 +395,9 @@ impl ImageBuffer {
         OneTimeCommand::new(device.clone(), command_pool)?.take_and_execute(
             |command| unsafe {
                 device.cmd_copy_buffer_to_image(
-                    *command.vk_command_buffer(),
+                    *command.command_buffer(),
                     staging_buffer.buffer(),
-                    image_buffer.image,
+                    texture.image,
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     &[image_copy],
                 );
@@ -244,106 +406,91 @@ impl ImageBuffer {
             queue,
         )?;
 
-        image_buffer.transition_layout(
+        texture.transition_layout(
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            vk::ImageAspectFlags::COLOR,
             command_pool,
             queue,
         )?;
 
-        Ok(image_buffer)
+        Ok(texture)
     }
 }
 
-impl Drop for ImageBuffer {
+impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_image(self.image, None);
-            self.device.free_memory(self.device_momory, None)
+            self.device.free_memory(self.device_momory, None);
+            if let Some(view) = &self.image_view {
+                if Rc::strong_count(view) == 1 {
+                    self.device.destroy_image_view(**view, None);
+                }
+            }
+            if let Some(sampler) = &self.sampler {
+                if Rc::strong_count(sampler) == 1 {
+                    self.device.destroy_sampler(**sampler, None);
+                }
+            }
         }
     }
 }
 
-pub struct DepthStencilImageAndView {
-    buffer: ImageBuffer,
-    image_view: vk::ImageView,
-    device: Rc<Device>,
-}
+pub struct DepthStencil(Texture);
 
-impl DepthStencilImageAndView {
+impl DepthStencil {
     pub fn new(extent: vk::Extent2D, format: vk::Format, device: Rc<Device>) -> RenderResult<Self> {
-        let buffer = ImageBuffer::new(
+        let mut buffer = Texture::builder(
             extent.width,
             extent.height,
             format,
-            vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
             device.clone(),
-        )?;
-        let image_view = image_helper::create_image_view(
-            buffer.vk_image(),
-            format,
-            vk::ImageAspectFlags::DEPTH,
-            &device,
-        )?;
-        Ok(Self {
-            buffer,
-            image_view,
-            device,
-        })
+        )
+        .build()?;
+
+        let image_view = {
+            let create_info = vk::ImageViewCreateInfo::builder()
+                .image(*buffer.image())
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(buffer.format())
+                .subresource_range(
+                    vk::ImageSubresourceRange::builder()
+                        .aspect_mask(vk::ImageAspectFlags::DEPTH)
+                        .base_mip_level(0)
+                        .level_count(buffer.mip_levels)
+                        .base_array_layer(0)
+                        .layer_count(buffer.array_layers)
+                        .build(),
+                )
+                .build();
+            unsafe { buffer.device.create_image_view(&create_info, None)? }
+        };
+
+        buffer.set_image_view(Rc::new(image_view));
+        Ok(DepthStencil(buffer))
     }
 
-    pub fn buffer(&self) -> &ImageBuffer {
-        &self.buffer
+    pub fn buffer(&self) -> &Texture {
+        &self.0
     }
 
-    pub fn image_view(&self) -> &vk::ImageView {
-        &self.image_view
+    pub fn image_view(&self) -> Rc<vk::ImageView> {
+        self.0.image_view().unwrap().clone()
     }
 
     pub fn format(&self) -> vk::Format {
-        self.buffer.format
-    }
-}
-
-impl Drop for DepthStencilImageAndView {
-    fn drop(&mut self) {
-        unsafe { self.device.destroy_image_view(self.image_view, None) }
+        self.0.format()
     }
 }
 
 pub mod image_helper {
     use super::*;
 
-    pub fn create_image_view(
-        image: vk::Image,
-        format: vk::Format,
-        aspect_flags: vk::ImageAspectFlags,
-        device: &Device,
-    ) -> VkResult<vk::ImageView> {
-        let create_info = vk::ImageViewCreateInfo::builder()
-            .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(format)
-            .subresource_range(
-                vk::ImageSubresourceRange::builder()
-                    .aspect_mask(aspect_flags)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1)
-                    .build(),
-            )
-            .build();
-        unsafe { device.create_image_view(&create_info, None) }
-    }
-
-    pub fn create_texture_sampler(device: &Device) -> VkResult<vk::Sampler> {
+    pub fn create_texture_sampler(device: &Device, filter: vk::Filter) -> VkResult<vk::Sampler> {
         let create_info = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
+            .mag_filter(filter)
+            .min_filter(filter)
             .address_mode_u(vk::SamplerAddressMode::REPEAT)
             .address_mode_v(vk::SamplerAddressMode::REPEAT)
             .address_mode_w(vk::SamplerAddressMode::REPEAT)
@@ -358,7 +505,7 @@ pub mod image_helper {
             .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
             .unnormalized_coordinates(false)
             .compare_enable(false)
-            .compare_op(vk::CompareOp::ALWAYS)
+            .compare_op(vk::CompareOp::NEVER)
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .mip_lod_bias(0.)
             .max_lod(0.)

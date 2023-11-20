@@ -6,8 +6,7 @@ use winit::window::Window;
 use crate::{
     error::{RenderError, RenderResult},
     vulkan_objects::{
-        format_helper, DepthStencilImageAndView, Device, Instance, QueueInfo, Surface,
-        SwapChainBatch,
+        format_helper, DepthStencil, Device, Instance, QueueInfo, Surface, SwapChainBatch,
     },
 };
 
@@ -25,7 +24,7 @@ pub struct FixedVulkanStuff {
     pub command_pool: vk::CommandPool,
     pub command_buffers: [vk::CommandBuffer; Self::MAX_FRAMES_IN_FLIGHT],
     pub frame_sync_primitives: [FrameSyncPrimitive; Self::MAX_FRAMES_IN_FLIGHT],
-    pub depth_image_and_view: DepthStencilImageAndView,
+    pub depth_stencil: DepthStencil,
     pub render_pass: vk::RenderPass,
 }
 
@@ -33,8 +32,12 @@ impl FixedVulkanStuff {
     pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
     pub fn new(window: &Window, instance: Rc<Instance>) -> RenderResult<Self> {
-        let surface = Rc::new(Surface::new_with_default_format(window, instance.clone())?);
-        let device = Rc::new(Device::new(instance, QueueInfo::from_surface(&surface)?)?);
+        let surface = Rc::new(Surface::new(
+            window,
+            instance.clone(),
+            vk::Format::B8G8R8A8_SRGB,
+        )?);
+        let device = Rc::new(Device::new(instance, QueueInfo::new(&surface)?)?);
         let swapchain_batch = SwapChainBatch::new(surface.clone(), device.clone())?;
         let command_pool = {
             let create_info = vk::CommandPoolCreateInfo::builder()
@@ -74,16 +77,14 @@ impl FixedVulkanStuff {
                 })
             })?;
         let depth_format = format_helper::find_depth_format(&device)?;
-        let depth_image_and_view =
-            DepthStencilImageAndView::new(surface.extent(), depth_format, device.clone())?;
-        let render_pass =
-            create_renderpass(surface.format(), depth_image_and_view.format(), &device)?;
+        let depth_stencil = DepthStencil::new(surface.extent(), depth_format, device.clone())?;
+        let render_pass = create_renderpass(surface.format(), depth_stencil.format(), &device)?;
         let swapchain_framebuffers = create_swapchain_frame_buffer(
             &swapchain_batch,
             &render_pass,
             surface.extent(),
             &device,
-            depth_image_and_view.image_view(),
+            &depth_stencil.image_view(),
         )?;
 
         Ok(Self {
@@ -93,7 +94,7 @@ impl FixedVulkanStuff {
             command_pool,
             command_buffers,
             frame_sync_primitives,
-            depth_image_and_view,
+            depth_stencil,
             render_pass,
             swapchain_framebuffers,
         })
@@ -104,9 +105,9 @@ impl FixedVulkanStuff {
             self.device.device_wait_idle()?;
             self.surface.refit_surface_attribute(window)?;
             self.swapchain_batch.recreate()?;
-            self.depth_image_and_view = DepthStencilImageAndView::new(
+            self.depth_stencil = DepthStencil::new(
                 self.surface.extent(),
-                self.depth_image_and_view.format(),
+                self.depth_stencil.format(),
                 self.device.clone(),
             )?;
             self.swapchain_framebuffers
@@ -117,7 +118,7 @@ impl FixedVulkanStuff {
                 &self.render_pass,
                 self.surface.extent(),
                 &self.device,
-                self.depth_image_and_view.image_view(),
+                &self.depth_stencil.image_view(),
             )?;
             Ok(())
         }

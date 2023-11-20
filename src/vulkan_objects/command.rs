@@ -28,7 +28,7 @@ impl<'a> OneTimeCommand<'a> {
         })
     }
 
-    pub fn vk_command_buffer(&self) -> &vk::CommandBuffer {
+    pub fn command_buffer(&self) -> &vk::CommandBuffer {
         &self.command_buffer
     }
 
@@ -53,25 +53,27 @@ impl<'a> OneTimeCommand<'a> {
     pub fn end_and_submit(&self, queue: &vk::Queue) -> VkResult<()> {
         unsafe {
             self.device.end_command_buffer(self.command_buffer)?;
-
+            let fence = self
+                .device
+                .create_fence(&vk::FenceCreateInfo::default(), None)?;
             self.device.queue_submit(
                 *queue,
                 &[vk::SubmitInfo::builder()
                     .command_buffers(&[self.command_buffer])
                     .build()],
-                vk::Fence::null(),
+                fence,
             )?;
-            self.device.queue_wait_idle(*queue)?;
+            self.device.wait_for_fences(&[fence], true, u64::MAX)?;
+            self.device.destroy_fence(fence, None);
         }
 
         Ok(())
     }
 
-    pub fn take_and_execute<F: Fn(&OneTimeCommand) -> VkResult<()>>(
-        &self,
-        f: F,
-        queue: &vk::Queue,
-    ) -> VkResult<()> {
+    pub fn take_and_execute<F>(&self, f: F, queue: &vk::Queue) -> VkResult<()>
+    where
+        F: Fn(&Self) -> VkResult<()>,
+    {
         self.begin()?;
         f(self)?;
         self.end_and_submit(queue)?;
