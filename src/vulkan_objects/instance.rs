@@ -11,8 +11,8 @@ use winit::window::Window;
 
 use crate::error::{RenderError, RenderResult};
 
-const VALIDATION_LAYER_NAME: *const i8 =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr() };
+const VALIDATION_LAYER_NAME: &CStr =
+    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") };
 
 #[derive(Clone, Copy, Debug)]
 pub enum VulkanApiVersion {
@@ -151,8 +151,8 @@ impl Instance {
             .api_version(vulkan_api_version.get_u32_version())
             .build();
 
-        let layer_names = if validation_layer_enabled {
-            vec![VALIDATION_LAYER_NAME]
+        let layer_names: Vec<*const c_char> = if validation_layer_enabled {
+            vec![VALIDATION_LAYER_NAME.as_ptr()]
         } else {
             vec![]
         };

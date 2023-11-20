@@ -141,11 +141,13 @@ impl<T> Buffer<T> {
         self.mapped_ptr.take();
     }
 
-    pub fn load_data(&mut self, data: &[T]) -> VkResult<()> {
-        assert!(data.len() as u64 * Self::element_size_in_bytes() == self.size_in_bytes);
+    pub fn load_data<D>(&mut self, data: &[D], offset: vk::DeviceSize) -> VkResult<()> {
+        debug_assert!(offset % self.alignment == 0);
+        let data_size = std::mem::size_of_val(data) as vk::DeviceSize;
+        assert!(data_size + offset <= self.size_in_bytes);
         unsafe {
-            let mapped_ptr = self.map_memory_all()?;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr as *mut T, data.len());
+            let mapped_ptr = self.map_memory(offset, data_size)?;
+            std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr as *mut D, data.len());
             self.unmap_memory();
         }
         Ok(())
@@ -159,7 +161,7 @@ impl<T> Buffer<T> {
     ) -> VkResult<()> {
         assert!(self.size_in_bytes == dst.size_in_bytes);
 
-        OneTimeCommand::new(self.device.clone(), command_pool)?.take_and_execute(
+        OneTimeCommand::new(&self.device, command_pool)?.take_and_execute(
             |command| unsafe {
                 self.device.cmd_copy_buffer(
                     *command.command_buffer(),
@@ -190,7 +192,7 @@ impl<T> Buffer<T> {
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                 device.clone(),
             )?;
-            buffer.load_data(data)?;
+            buffer.load_data(data, 0)?;
             buffer
         };
 

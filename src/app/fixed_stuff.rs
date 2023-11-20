@@ -84,7 +84,7 @@ impl FixedVulkanStuff {
             &render_pass,
             surface.extent(),
             &device,
-            &depth_stencil.image_view(),
+            depth_stencil.image_view(),
         )?;
 
         Ok(Self {
@@ -118,7 +118,7 @@ impl FixedVulkanStuff {
                 &self.render_pass,
                 self.surface.extent(),
                 &self.device,
-                &self.depth_stencil.image_view(),
+                self.depth_stencil.image_view(),
             )?;
             Ok(())
         }

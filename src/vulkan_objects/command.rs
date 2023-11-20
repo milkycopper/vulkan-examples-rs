@@ -1,17 +1,15 @@
-use std::rc::Rc;
-
 use ash::{prelude::VkResult, vk};
 
 use super::Device;
 
 pub struct OneTimeCommand<'a> {
     command_buffer: vk::CommandBuffer,
-    device: Rc<Device>,
+    device: &'a Device,
     pool: &'a vk::CommandPool,
 }
 
 impl<'a> OneTimeCommand<'a> {
-    pub fn new(device: Rc<Device>, pool: &'a vk::CommandPool) -> VkResult<Self> {
+    pub fn new(device: &'a Device, pool: &'a vk::CommandPool) -> VkResult<Self> {
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
             .command_buffer_count(1)
             .command_pool(*pool)
@@ -44,7 +42,7 @@ impl<'a> OneTimeCommand<'a> {
         Ok(())
     }
 
-    pub fn new_and_begin(device: Rc<Device>, pool: &'a vk::CommandPool) -> VkResult<Self> {
+    pub fn new_and_begin(device: &'a Device, pool: &'a vk::CommandPool) -> VkResult<Self> {
         let command = Self::new(device, pool)?;
         command.begin()?;
         Ok(command)

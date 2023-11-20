@@ -5,13 +5,13 @@ use std::{
 
 use ash::{prelude::VkResult, vk};
 
-use super::{Instance, QueueInfo, QueueWithInfo};
+use super::{Instance, QueueInfo, QueueState};
 
 pub struct Device {
     inner: ash::Device,
     instance: Rc<Instance>,
     physical_device: Weak<vk::PhysicalDevice>,
-    queue: QueueWithInfo,
+    queue_state: QueueState,
 }
 
 impl Device {
@@ -50,8 +50,8 @@ impl Device {
                 instance.create_device(*physical_device.upgrade().unwrap(), &create_info, None)?
             }
         };
-        let queue = unsafe {
-            QueueWithInfo {
+        let queue_state = unsafe {
+            QueueState {
                 info: queue_info,
                 graphic_queue: inner
                     .get_device_queue(queue_info.graphic_family_index_priority.0, 0),
@@ -64,7 +64,7 @@ impl Device {
             inner,
             instance,
             physical_device,
-            queue,
+            queue_state,
         })
     }
 
@@ -77,7 +77,7 @@ impl Device {
     }
 
     pub fn queue_family_indices(&self) -> Vec<u32> {
-        self.queue
+        self.queue_state
             .info
             .merge_queue_family_index_and_priority()
             .iter()
@@ -85,24 +85,24 @@ impl Device {
             .collect()
     }
 
-    pub fn queue(&self) -> &QueueWithInfo {
-        &self.queue
+    pub fn queue_state(&self) -> &QueueState {
+        &self.queue_state
     }
 
     pub fn graphic_queue(&self) -> vk::Queue {
-        self.queue.graphic_queue
+        self.queue_state.graphic_queue
     }
 
     pub fn present_queue(&self) -> vk::Queue {
-        self.queue.present_queue
+        self.queue_state.present_queue
     }
 
     pub fn graphic_queue_family_index(&self) -> u32 {
-        self.queue.info.graphic_family_index_priority.0
+        self.queue_state.info.graphic_family_index_priority.0
     }
 
     pub fn present_queue_family_index(&self) -> u32 {
-        self.queue.info.present_family_index_priority.0
+        self.queue_state.info.present_family_index_priority.0
     }
 }
 

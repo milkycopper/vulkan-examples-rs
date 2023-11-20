@@ -5,7 +5,7 @@ mod surface;
 pub use surface::{extent_helper, Surface, SurfaceAttributes};
 
 mod queue;
-pub use queue::{QueueInfo, QueueWithInfo};
+pub use queue::{QueueInfo, QueueState};
 
 mod device;
 pub use device::Device;

@@ -10,7 +10,7 @@ use crate::error::{RenderError, RenderResult};
 pub struct TextureBuilder {
     width: u32,
     height: u32,
-    extent_depth: u32,
+    depth: u32,
     layout: vk::ImageLayout,
     mip_levels: u32,
     array_layers: u32,
@@ -31,7 +31,7 @@ impl TextureBuilder {
         Self {
             width,
             height,
-            extent_depth: 1,
+            depth: 1,
             layout: vk::ImageLayout::UNDEFINED,
             mip_levels: 1,
             array_layers: 1,
@@ -42,8 +42,8 @@ impl TextureBuilder {
         }
     }
 
-    pub fn extent_depth(mut self, depth: u32) -> Self {
-        self.extent_depth = depth;
+    pub fn depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
         self
     }
 
@@ -71,7 +71,7 @@ impl TextureBuilder {
         Texture::new(
             self.width,
             self.height,
-            self.extent_depth,
+            self.depth,
             self.layout,
             self.mip_levels,
             self.array_layers,
@@ -89,7 +89,7 @@ pub struct Texture {
     device_momory: vk::DeviceMemory,
     image_layout: vk::ImageLayout,
     extent_2d: vk::Extent2D,
-    extent_depth: u32,
+    depth: u32,
     mip_levels: u32,
     array_layers: u32,
     format: vk::Format,
@@ -103,7 +103,7 @@ impl Texture {
     pub fn new(
         width: u32,
         height: u32,
-        extent_depth: u32,
+        depth: u32,
         layout: vk::ImageLayout,
         mip_levels: u32,
         array_layers: u32,
@@ -113,7 +113,7 @@ impl Texture {
         device: Rc<Device>,
     ) -> RenderResult<Self> {
         let create_info = vk::ImageCreateInfo::builder()
-            .image_type(if extent_depth > 1 {
+            .image_type(if depth > 1 {
                 vk::ImageType::TYPE_3D
             } else {
                 vk::ImageType::TYPE_2D
@@ -122,7 +122,7 @@ impl Texture {
                 vk::Extent3D::builder()
                     .width(width)
                     .height(height)
-                    .depth(extent_depth)
+                    .depth(depth)
                     .build(),
             )
             .mip_levels(mip_levels)
@@ -156,7 +156,7 @@ impl Texture {
                 device_momory,
                 image_layout: layout,
                 extent_2d: vk::Extent2D::builder().width(width).height(height).build(),
-                extent_depth,
+                depth,
                 mip_levels,
                 array_layers,
                 format,
@@ -201,8 +201,8 @@ impl Texture {
         self.image_layout
     }
 
-    pub fn image_view(&self) -> Option<Rc<vk::ImageView>> {
-        self.image_view.clone()
+    pub fn image_view(&self) -> Option<&vk::ImageView> {
+        self.image_view.as_deref()
     }
 
     pub fn set_image_view(&mut self, image_view: Rc<vk::ImageView>) {
@@ -211,7 +211,7 @@ impl Texture {
 
     pub fn spawn_image_view(&mut self) -> VkResult<()> {
         let image_view = {
-            let image_view_type = if self.extent_depth > 1 {
+            let image_view_type = if self.depth > 1 {
                 vk::ImageViewType::TYPE_3D
             } else if self.array_layers > 1 {
                 vk::ImageViewType::TYPE_2D_ARRAY
@@ -238,8 +238,8 @@ impl Texture {
         Ok(())
     }
 
-    pub fn sampler(&self) -> Option<Rc<vk::Sampler>> {
-        self.sampler.clone()
+    pub fn sampler(&self) -> Option<&vk::Sampler> {
+        self.sampler.as_deref()
     }
 
     pub fn set_sampler(&mut self, sampler: Rc<vk::Sampler>) {
@@ -270,6 +270,7 @@ impl Texture {
         self.descriptor(*self.image_view().unwrap(), *self.sampler().unwrap())
     }
 
+    /// TODO: support more types of layout transition
     pub fn transition_layout(
         &mut self,
         old_layout: vk::ImageLayout,
@@ -321,7 +322,7 @@ impl Texture {
             .dst_access_mask(dst_access_mask)
             .build();
 
-        OneTimeCommand::new(self.device.clone(), command_pool)?.take_and_execute(
+        OneTimeCommand::new(&self.device, command_pool)?.take_and_execute(
             |command| unsafe {
                 self.device.cmd_pipeline_barrier(
                     *command.command_buffer(),
@@ -350,6 +351,17 @@ impl Texture {
         let image_data = image_loader::io::Reader::open(&path)?.decode()?.to_rgba8();
         let size = image_data.len();
 
+        let staging_buffer = {
+            let mut buffer = Buffer::<u8>::new(
+                size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                device.clone(),
+            )?;
+            buffer.load_data(&image_data, 0)?;
+            buffer
+        };
+
         let mut texture = Self::builder(
             image_data.width(),
             image_data.height(),
@@ -358,17 +370,6 @@ impl Texture {
             device.clone(),
         )
         .build()?;
-
-        let staging_buffer = {
-            let mut buffer = Buffer::<u8>::new(
-                size,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                device.clone(),
-            )?;
-            buffer.load_data(&image_data)?;
-            buffer
-        };
 
         texture.transition_layout(
             vk::ImageLayout::UNDEFINED,
@@ -396,7 +397,7 @@ impl Texture {
             )
             .build();
 
-        OneTimeCommand::new(device.clone(), command_pool)?.take_and_execute(
+        OneTimeCommand::new(&device, command_pool)?.take_and_execute(
             |command| unsafe {
                 device.cmd_copy_buffer_to_image(
                     *command.command_buffer(),
@@ -438,11 +439,26 @@ impl Texture {
             }
         };
         let data: Vec<Vec<u8>> = decoder.read_textures().collect();
+
+        // TODO: deal with multi level data
         assert!(data.len() == 1);
+
         let data = data.concat();
         let size = data.len();
         let size_per_layer = size as u32 / layer_count;
+
         assert!(size_per_layer * layer_count == size as u32);
+
+        let staging_buffer = {
+            let mut buffer = Buffer::<u8>::new(
+                size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                device.clone(),
+            )?;
+            buffer.load_data(&data, 0)?;
+            buffer
+        };
 
         let mut texture = Texture::builder(
             width,
@@ -453,17 +469,6 @@ impl Texture {
         )
         .array_layers(layer_count)
         .build()?;
-
-        let staging_buffer = {
-            let mut buffer = Buffer::<u8>::new(
-                size,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                device.clone(),
-            )?;
-            buffer.load_data(&data)?;
-            buffer
-        };
 
         texture.transition_layout(
             vk::ImageLayout::UNDEFINED,
@@ -488,7 +493,7 @@ impl Texture {
                         vk::Extent3D::builder()
                             .width(width)
                             .height(height)
-                            .depth(1)
+                            .depth(texture.depth)
                             .build(),
                     )
                     .buffer_offset((size_per_layer * layer) as u64)
@@ -496,7 +501,7 @@ impl Texture {
             })
             .collect::<Vec<_>>();
 
-        OneTimeCommand::new(device.clone(), command_pool)?.take_and_execute(
+        OneTimeCommand::new(&device, command_pool)?.take_and_execute(
             |command| unsafe {
                 device.cmd_copy_buffer_to_image(
                     *command.command_buffer(),
@@ -555,9 +560,9 @@ impl DepthStencil {
 
         let image_view = {
             let create_info = vk::ImageViewCreateInfo::builder()
-                .image(*buffer.image())
+                .image(buffer.image)
                 .view_type(vk::ImageViewType::TYPE_2D)
-                .format(buffer.format())
+                .format(buffer.format)
                 .subresource_range(
                     vk::ImageSubresourceRange::builder()
                         .aspect_mask(vk::ImageAspectFlags::DEPTH)
@@ -579,8 +584,8 @@ impl DepthStencil {
         &self.0
     }
 
-    pub fn image_view(&self) -> Rc<vk::ImageView> {
-        self.0.image_view().unwrap().clone()
+    pub fn image_view(&self) -> &vk::ImageView {
+        self.0.image_view().unwrap()
     }
 
     pub fn format(&self) -> vk::Format {

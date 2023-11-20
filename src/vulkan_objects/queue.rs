@@ -10,7 +10,7 @@ pub struct QueueInfo {
 }
 
 #[derive(Default, Clone, Copy)]
-pub struct QueueWithInfo {
+pub struct QueueState {
     pub info: QueueInfo,
     pub graphic_queue: vk::Queue,
     pub present_queue: vk::Queue,

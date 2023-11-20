@@ -7,6 +7,8 @@ use ash::vk;
 use super::Device;
 use crate::error::RenderResult;
 
+/// # Caution
+/// Should not be dropped before pipeline creation
 pub struct ShaderModule(vk::ShaderModule, Rc<Device>);
 
 impl Drop for ShaderModule {
