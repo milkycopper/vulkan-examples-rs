@@ -65,7 +65,7 @@ impl Vertex {
     }
 
     pub fn create_buffer(
-        data: &Vec<Self>,
+        data: &[Self],
         device: Rc<Device>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,

@@ -49,7 +49,7 @@ impl WindowApp for DrawTriangleApp {
         let model_vertices = vec![vec3(-0.5, -0.5, 0.), vec3(0.5, -0.5, 0.), vec3(0., 0.5, 0.)]
             .into_iter()
             .map(|v3| Vertex::new(v3).with_color(v3 + vec3(0.5, 0.4, 0.3)))
-            .collect();
+            .collect::<Vec<_>>();
 
         let fixed_vulkan_stuff = Self::create_fixed_vulkan_stuff(&window).unwrap();
         let descriptor_set_layout = {

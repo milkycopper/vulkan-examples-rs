@@ -2,6 +2,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use ash::{prelude::VkResult, vk};
+use ktx::KtxInfo;
 
 use super::{Buffer, Device, OneTimeCommand};
 use crate::error::{RenderError, RenderResult};
@@ -210,13 +211,16 @@ impl Texture {
 
     pub fn spawn_image_view(&mut self) -> VkResult<()> {
         let image_view = {
+            let image_view_type = if self.extent_depth > 1 {
+                vk::ImageViewType::TYPE_3D
+            } else if self.array_layers > 1 {
+                vk::ImageViewType::TYPE_2D_ARRAY
+            } else {
+                vk::ImageViewType::TYPE_2D
+            };
             let create_info = vk::ImageViewCreateInfo::builder()
                 .image(self.image)
-                .view_type(if self.extent_depth > 1 {
-                    vk::ImageViewType::TYPE_3D
-                } else {
-                    vk::ImageViewType::TYPE_2D
-                })
+                .view_type(image_view_type)
                 .format(self.format)
                 .subresource_range(
                     vk::ImageSubresourceRange::builder()
@@ -414,6 +418,106 @@ impl Texture {
         )?;
 
         Ok(texture)
+    }
+
+    pub fn from_ktx<P: AsRef<Path>>(
+        path: P,
+        device: Rc<Device>,
+        command_pool: &vk::CommandPool,
+        queue: &vk::Queue,
+    ) -> RenderResult<(Self, u32)> {
+        let buf_reader = std::io::BufReader::new(std::fs::File::open(path)?);
+        let decoder = ktx::Decoder::new(buf_reader)?;
+        let (width, height) = (decoder.pixel_width(), decoder.pixel_height());
+        let layer_count = {
+            let x = decoder.array_elements();
+            if x == 0 {
+                1
+            } else {
+                x
+            }
+        };
+        let data: Vec<Vec<u8>> = decoder.read_textures().collect();
+        assert!(data.len() == 1);
+        let data = data.concat();
+        let size = data.len();
+        let size_per_layer = size as u32 / layer_count;
+        assert!(size_per_layer * layer_count == size as u32);
+
+        let mut texture = Texture::builder(
+            width,
+            height,
+            vk::Format::R8G8B8A8_UNORM,
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            device.clone(),
+        )
+        .array_layers(layer_count)
+        .build()?;
+
+        let staging_buffer = {
+            let mut buffer = Buffer::<u8>::new(
+                size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                device.clone(),
+            )?;
+            buffer.load_data(&data)?;
+            buffer
+        };
+
+        texture.transition_layout(
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            command_pool,
+            queue,
+        )?;
+
+        let image_copies = (0..layer_count)
+            .map(|layer| {
+                vk::BufferImageCopy::builder()
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::builder()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .mip_level(0)
+                            .base_array_layer(layer)
+                            .layer_count(1)
+                            .build(),
+                    )
+                    .image_offset(vk::Offset3D::default())
+                    .image_extent(
+                        vk::Extent3D::builder()
+                            .width(width)
+                            .height(height)
+                            .depth(1)
+                            .build(),
+                    )
+                    .buffer_offset((size_per_layer * layer) as u64)
+                    .build()
+            })
+            .collect::<Vec<_>>();
+
+        OneTimeCommand::new(device.clone(), command_pool)?.take_and_execute(
+            |command| unsafe {
+                device.cmd_copy_buffer_to_image(
+                    *command.command_buffer(),
+                    staging_buffer.buffer(),
+                    texture.image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &image_copies,
+                );
+                Ok(())
+            },
+            queue,
+        )?;
+
+        texture.transition_layout(
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            command_pool,
+            queue,
+        )?;
+
+        Ok((texture, layer_count))
     }
 }
 

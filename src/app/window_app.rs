@@ -159,7 +159,7 @@ macro_rules! window_fns {
         }
 
         fn window_title() -> String {
-            stringify!(DrawTriangleApp).to_string()
+            stringify!($app_ty).to_string()
         }
 
         fn window(&self) -> &Window {
