@@ -1,12 +1,12 @@
 use std::{cell::RefCell, rc::Rc, time::SystemTime};
 
-use ash::vk;
+use ash::vk::{self, DescriptorSetLayoutBinding};
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::EventLoop,
     platform::run_return::EventLoopExtRunReturn,
-    window::Window,
+    window::{Window, WindowBuilder},
 };
 
 use super::FixedVulkanStuff;
@@ -14,7 +14,7 @@ use crate::{
     camera::Camera,
     error::RenderResult,
     transforms::Direction,
-    vulkan_objects::{Instance, VulkanApiVersion},
+    vulkan_objects::{Device, Instance, VulkanApiVersion},
 };
 
 pub struct ClearValue {
@@ -39,8 +39,19 @@ pub trait WindowApp {
     fn last_frame_time_stamp(&self) -> SystemTime;
     fn camera(&mut self) -> &mut Camera;
 
+    fn descriptor_pool_sizes() -> Vec<vk::DescriptorPoolSize>;
+    fn descriptor_set_layout_bindings() -> Vec<DescriptorSetLayoutBinding>;
+
     fn window_size(&self) -> PhysicalSize<u32> {
         self.window().inner_size()
+    }
+
+    fn build_window(event_loop: &EventLoop<()>) -> Window {
+        WindowBuilder::new()
+            .with_title(Self::window_title())
+            .with_inner_size(PhysicalSize::new(1800, 1200))
+            .build(event_loop)
+            .expect("Fail to build a window")
     }
 
     fn render_loop(&mut self, event_loop: &RefCell<EventLoop<()>>) {
@@ -144,15 +155,48 @@ pub trait WindowApp {
                 .engine_name_and_version("No Engine", 0)
                 .vulkan_api_version(VulkanApiVersion::V1_0)
                 .enable_validation_layer(true)
-                .build()
-                .unwrap(),
+                .build()?,
         );
         FixedVulkanStuff::new(window, instance)
+    }
+
+    fn create_descriptor_pool(device: &Device) -> RenderResult<vk::DescriptorPool> {
+        let create_info = vk::DescriptorPoolCreateInfo::builder()
+            .pool_sizes(&Self::descriptor_pool_sizes())
+            .max_sets(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
+            .build();
+        Ok(unsafe { device.create_descriptor_pool(&create_info, None)? })
+    }
+
+    fn create_descriptor_set_layout(device: &Device) -> RenderResult<vk::DescriptorSetLayout> {
+        let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&Self::descriptor_set_layout_bindings())
+            .build();
+        Ok(unsafe {
+            device.create_descriptor_set_layout(&descriptor_set_layout_create_info, None)?
+        })
+    }
+
+    fn create_descriptor_sets(
+        pool: vk::DescriptorPool,
+        descriptor_set_layout: vk::DescriptorSetLayout,
+        device: &Device,
+    ) -> RenderResult<[vk::DescriptorSet; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT]> {
+        unsafe {
+            let allocate_info = vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(pool)
+                .set_layouts(&[descriptor_set_layout; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT])
+                .build();
+            Ok(device
+                .allocate_descriptor_sets(&allocate_info)?
+                .try_into()
+                .unwrap())
+        }
     }
 }
 
 #[macro_export]
-macro_rules! window_fns {
+macro_rules! impl_window_fns {
     ($app_ty: ty) => {
         fn on_window_resized(&mut self, _size: PhysicalSize<u32>) {
             self.window_resized = true;
@@ -176,4 +220,30 @@ macro_rules! window_fns {
     };
 }
 
-pub use window_fns;
+#[macro_export]
+macro_rules! impl_drop_trait {
+    ($app_ty: ty) => {
+        impl Drop for $app_ty {
+            fn drop(&mut self) {
+                unsafe {
+                    self.fixed_vulkan_stuff.device.device_wait_idle().unwrap();
+                    self.fixed_vulkan_stuff
+                        .device
+                        .destroy_pipeline(self.pipeline, None);
+                    self.fixed_vulkan_stuff
+                        .device
+                        .destroy_pipeline_layout(self.pipeline_layout, None);
+                    self.fixed_vulkan_stuff
+                        .device
+                        .destroy_descriptor_pool(self.descriptor_pool, None);
+                    self.fixed_vulkan_stuff
+                        .device
+                        .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+                }
+            }
+        }
+    };
+}
+
+pub use impl_drop_trait;
+pub use impl_window_fns;

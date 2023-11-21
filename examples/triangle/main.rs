@@ -2,19 +2,15 @@ use std::{cell::RefCell, ffi::c_void, rc::Rc, time::SystemTime};
 
 use ash::vk;
 use glam::{vec3, Mat4, Vec3};
-use winit::{
-    dpi::PhysicalSize,
-    event_loop::EventLoop,
-    window::{Window, WindowBuilder},
-};
+use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 
 use vulkan_example_rs::{
     app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
     camera::Camera,
+    impl_drop_trait, impl_window_fns,
     mesh::Vertex,
     transforms::MVPMatrix,
     vulkan_objects::{extent_helper, Buffer, Device, Surface},
-    window_fns,
 };
 
 struct DrawTriangleApp {
@@ -29,7 +25,7 @@ struct DrawTriangleApp {
     fixed_vulkan_stuff: FixedVulkanStuff,
     descriptor_set_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: [vk::DescriptorSet; 2],
+    descriptor_sets: [vk::DescriptorSet; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
     vertex_buffer: Buffer<Vertex>,
@@ -38,65 +34,25 @@ struct DrawTriangleApp {
 }
 
 impl WindowApp for DrawTriangleApp {
-    window_fns!(DrawTriangleApp);
+    impl_window_fns!(DrawTriangleApp);
 
     fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
-        let window = WindowBuilder::new()
-            .with_title(Self::window_title())
-            .with_inner_size(PhysicalSize::new(1800, 1200))
-            .build(event_loop)
-            .unwrap();
+        let window = Self::build_window(event_loop);
         let model_vertices = vec![vec3(-0.5, -0.5, 0.), vec3(0.5, -0.5, 0.), vec3(0., 0.5, 0.)]
             .into_iter()
             .map(|v3| Vertex::new(v3).with_color(v3 + vec3(0.5, 0.4, 0.3)))
             .collect::<Vec<_>>();
 
         let fixed_vulkan_stuff = Self::create_fixed_vulkan_stuff(&window).unwrap();
-        let descriptor_set_layout = {
-            let ubo_layout_binding = vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .descriptor_count(1)
-                .build();
-            let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-                .bindings(&[ubo_layout_binding])
-                .build();
-
-            unsafe {
-                fixed_vulkan_stuff
-                    .device
-                    .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
-                    .unwrap()
-            }
-        };
-        let descriptor_pool = unsafe {
-            let create_info = vk::DescriptorPoolCreateInfo::builder()
-                .pool_sizes(&[vk::DescriptorType::UNIFORM_BUFFER].map(|ty| {
-                    vk::DescriptorPoolSize::builder()
-                        .ty(ty)
-                        .descriptor_count(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
-                        .build()
-                }))
-                .max_sets(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
-                .build();
-            fixed_vulkan_stuff
-                .device
-                .create_descriptor_pool(&create_info, None)
-                .unwrap()
-        };
-        let descriptor_sets: [vk::DescriptorSet; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] = unsafe {
-            let allocate_info = vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(descriptor_pool)
-                .set_layouts(&[descriptor_set_layout; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT])
-                .build();
-            fixed_vulkan_stuff
-                .device
-                .allocate_descriptor_sets(&allocate_info)
-                .unwrap()
-                .try_into()
-                .unwrap()
-        };
+        let descriptor_set_layout =
+            Self::create_descriptor_set_layout(&fixed_vulkan_stuff.device).unwrap();
+        let descriptor_pool = Self::create_descriptor_pool(&fixed_vulkan_stuff.device).unwrap();
+        let descriptor_sets = Self::create_descriptor_sets(
+            descriptor_pool,
+            descriptor_set_layout,
+            &fixed_vulkan_stuff.device,
+        )
+        .unwrap();
 
         let pipeline_creator = PipelineCreator {
             device: fixed_vulkan_stuff.device.clone(),
@@ -110,7 +66,7 @@ impl WindowApp for DrawTriangleApp {
         let vertex_buffer = Vertex::create_buffer(
             &model_vertices,
             fixed_vulkan_stuff.device.clone(),
-            &fixed_vulkan_stuff.command_pool,
+            &fixed_vulkan_stuff.graphic_command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
         )
         .unwrap();
@@ -118,7 +74,7 @@ impl WindowApp for DrawTriangleApp {
         let indice_buffer = Buffer::new_device_local(
             &[0, 1, 2, 1, 0, 2],
             fixed_vulkan_stuff.device.clone(),
-            &fixed_vulkan_stuff.command_pool,
+            &fixed_vulkan_stuff.graphic_command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
         )
         .unwrap();
@@ -185,7 +141,7 @@ impl WindowApp for DrawTriangleApp {
         self.update_uniform_buffer(&self.camera, &self.uniform_buffers[self.current_frame]);
 
         self.record_render_commands(
-            self.fixed_vulkan_stuff.command_buffers[self.current_frame],
+            self.fixed_vulkan_stuff.graphic_command_buffers[self.current_frame],
             self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
             self.descriptor_sets[self.current_frame],
             6,
@@ -203,6 +159,24 @@ impl WindowApp for DrawTriangleApp {
 
         self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
         self.last_frame_time_stamp = SystemTime::now();
+    }
+
+    fn descriptor_pool_sizes() -> Vec<vk::DescriptorPoolSize> {
+        vec![vk::DescriptorPoolSize::builder()
+            .ty(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
+            .build()]
+    }
+
+    fn descriptor_set_layout_bindings() -> Vec<vk::DescriptorSetLayoutBinding> {
+        let ubo_layout_binding = vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .descriptor_count(1)
+            .build();
+
+        vec![ubo_layout_binding]
     }
 }
 
@@ -320,25 +294,7 @@ impl DrawTriangleApp {
     }
 }
 
-impl Drop for DrawTriangleApp {
-    fn drop(&mut self) {
-        unsafe {
-            self.fixed_vulkan_stuff.device.device_wait_idle().unwrap();
-            self.fixed_vulkan_stuff
-                .device
-                .destroy_pipeline(self.pipeline, None);
-            self.fixed_vulkan_stuff
-                .device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.fixed_vulkan_stuff
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-            self.fixed_vulkan_stuff
-                .device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-        }
-    }
-}
+impl_drop_trait!(DrawTriangleApp);
 
 struct PipelineCreator<'a> {
     device: Rc<Device>,
