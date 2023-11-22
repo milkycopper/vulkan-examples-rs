@@ -27,6 +27,7 @@ pub struct FixedVulkanStuff {
     pub frame_sync_primitives: [FrameSyncPrimitive; Self::MAX_FRAMES_IN_FLIGHT],
     pub depth_stencil: DepthStencil,
     pub render_pass: vk::RenderPass,
+    pub pipeline_cache: vk::PipelineCache,
 }
 
 impl FixedVulkanStuff {
@@ -88,6 +89,8 @@ impl FixedVulkanStuff {
             &device,
             depth_stencil.image_view(),
         )?;
+        let pipeline_cache =
+            unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None)? };
 
         Ok(Self {
             surface,
@@ -99,6 +102,7 @@ impl FixedVulkanStuff {
             depth_stencil,
             render_pass,
             swapchain_framebuffers,
+            pipeline_cache,
         })
     }
 
@@ -277,6 +281,8 @@ impl Drop for FixedVulkanStuff {
                 .iter()
                 .for_each(|fb| self.device.destroy_framebuffer(*fb, None));
             self.device.destroy_render_pass(self.render_pass, None);
+            self.device
+                .destroy_pipeline_cache(self.pipeline_cache, None);
         }
     }
 }

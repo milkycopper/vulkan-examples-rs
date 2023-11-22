@@ -225,6 +225,7 @@ impl WindowApp for TextureArrayExample {
             set_layouts: &[descriptor_set_layout],
             vertex_bindings: &[Vertex::binding_description()],
             vertex_attributes: &Vertex::attr_descriptions(),
+            pipeline_cache: fixed_vulkan_stuff.pipeline_cache,
         };
 
         let (pipeline_layout, pipeline) = pipeline_creator.build().unwrap();
@@ -420,6 +421,7 @@ struct PipelineCreator<'a> {
     set_layouts: &'a [vk::DescriptorSetLayout],
     vertex_bindings: &'a [vk::VertexInputBindingDescription],
     vertex_attributes: &'a [vk::VertexInputAttributeDescription],
+    pipeline_cache: vk::PipelineCache,
 }
 
 impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
@@ -444,6 +446,10 @@ impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
 
     fn subpass(&self) -> u32 {
         0
+    }
+
+    fn pipeline_cache(&self) -> vk::PipelineCache {
+        self.pipeline_cache
     }
 
     fn pipeline_layout(&self) -> vk::PipelineLayout {

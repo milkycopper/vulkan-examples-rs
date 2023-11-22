@@ -18,6 +18,10 @@ pub trait PipelineBuilder<'a, P: AsRef<Path>> {
     fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription];
     fn pipeline_layout(&self) -> vk::PipelineLayout;
 
+    fn pipeline_cache(&self) -> vk::PipelineCache {
+        vk::PipelineCache::null()
+    }
+
     fn vertex_input_state_create_info(&self) -> vk::PipelineVertexInputStateCreateInfo {
         vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(self.vertex_binding_descriptions())
@@ -137,7 +141,7 @@ pub trait PipelineBuilder<'a, P: AsRef<Path>> {
 
         let pipeline = unsafe {
             self.device()
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None)
+                .create_graphics_pipelines(self.pipeline_cache(), &[create_info], None)
                 .map_err(|e| e.1)?[0]
         };
 
