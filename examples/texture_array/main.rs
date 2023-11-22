@@ -205,20 +205,9 @@ impl WindowApp for TextureArrayExample {
                     // Instance texture array index
                     ubo_data.instances[i].array_index.x = i as f32;
                 }
-                let ptr = buffer
-                    .map_memory(
-                        std::mem::size_of::<Mat4>() as u64 * 2,
-                        (std::mem::size_of::<InstanceData>() * layer_count as usize) as u64,
-                    )
+                buffer
+                    .load_data(&ubo_data.instances, std::mem::size_of::<Mat4>() as u64 * 2)
                     .unwrap();
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        &ubo_data.instances as *const InstanceData,
-                        ptr as *mut InstanceData,
-                        layer_count as usize,
-                    )
-                };
-                buffer.unmap_memory();
                 let ptr = buffer
                     .map_memory(0, std::mem::size_of::<Mat4>() as u64 * 2)
                     .unwrap();

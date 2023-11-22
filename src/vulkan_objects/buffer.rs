@@ -142,7 +142,6 @@ impl<T> Buffer<T> {
     }
 
     pub fn load_data<D>(&mut self, data: &[D], offset: vk::DeviceSize) -> VkResult<()> {
-        debug_assert!(offset % self.alignment == 0);
         let data_size = std::mem::size_of_val(data) as vk::DeviceSize;
         assert!(data_size + offset <= self.size_in_bytes);
         unsafe {
