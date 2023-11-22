@@ -10,7 +10,7 @@ use vulkan_example_rs::{
     impl_drop_trait, impl_window_fns,
     mesh::Vertex,
     transforms::MVPMatrix,
-    vulkan_objects::{extent_helper, Buffer, Device, Surface},
+    vulkan_objects::{Buffer, Device, Surface},
 };
 
 struct DrawTriangleApp {
@@ -219,20 +219,10 @@ impl DrawTriangleApp {
                 .begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::default())
                 .expect("Fail to begin command buffer");
 
-            self.fixed_vulkan_stuff.device.cmd_begin_render_pass(
+            self.fixed_vulkan_stuff.cmd_begin_renderpass(
                 command_buffer,
-                &vk::RenderPassBeginInfo::builder()
-                    .render_pass(self.fixed_vulkan_stuff.render_pass)
-                    .framebuffer(frame_buffer)
-                    .render_area(
-                        vk::Rect2D::builder()
-                            .offset(vk::Offset2D { x: 0, y: 0 })
-                            .extent(self.fixed_vulkan_stuff.surface.extent())
-                            .build(),
-                    )
-                    .clear_values(&Self::clear_value().to_array())
-                    .build(),
-                vk::SubpassContents::INLINE,
+                frame_buffer,
+                &Self::clear_value(),
             );
 
             self.fixed_vulkan_stuff.device.cmd_bind_pipeline(
@@ -254,21 +244,8 @@ impl DrawTriangleApp {
                 vk::IndexType::UINT32,
             );
 
-            self.fixed_vulkan_stuff.device.cmd_set_viewport(
-                command_buffer,
-                0,
-                &[extent_helper::viewport_from_extent(
-                    self.fixed_vulkan_stuff.surface.extent(),
-                )],
-            );
-
-            self.fixed_vulkan_stuff.device.cmd_set_scissor(
-                command_buffer,
-                0,
-                &[extent_helper::scissor_from_extent(
-                    self.fixed_vulkan_stuff.surface.extent(),
-                )],
-            );
+            self.fixed_vulkan_stuff
+                .cmd_set_viewport_and_scissor(command_buffer);
 
             self.fixed_vulkan_stuff.device.cmd_bind_descriptor_sets(
                 command_buffer,

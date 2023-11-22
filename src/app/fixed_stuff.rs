@@ -6,7 +6,8 @@ use winit::window::Window;
 use crate::{
     error::{RenderError, RenderResult},
     vulkan_objects::{
-        format_helper, DepthStencil, Device, Instance, QueueInfo, Surface, SwapChainBatch,
+        extent_helper, format_helper, DepthStencil, Device, Instance, QueueInfo, Surface,
+        SwapChainBatch,
     },
 };
 
@@ -216,6 +217,47 @@ impl FixedVulkanStuff {
         };
 
         Ok(false)
+    }
+
+    pub fn cmd_set_viewport_and_scissor(&self, command_buffer: vk::CommandBuffer) {
+        unsafe {
+            self.device.cmd_set_viewport(
+                command_buffer,
+                0,
+                &[extent_helper::viewport_from_extent(self.surface.extent())],
+            );
+
+            self.device.cmd_set_scissor(
+                command_buffer,
+                0,
+                &[extent_helper::scissor_from_extent(self.surface.extent())],
+            );
+        }
+    }
+
+    pub fn cmd_begin_renderpass(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        frame_buffer: vk::Framebuffer,
+        clear_value: &super::ClearValue,
+    ) {
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                command_buffer,
+                &vk::RenderPassBeginInfo::builder()
+                    .render_pass(self.render_pass)
+                    .framebuffer(frame_buffer)
+                    .render_area(
+                        vk::Rect2D::builder()
+                            .offset(vk::Offset2D { x: 0, y: 0 })
+                            .extent(self.surface.extent())
+                            .build(),
+                    )
+                    .clear_values(&clear_value.to_array())
+                    .build(),
+                vk::SubpassContents::INLINE,
+            );
+        }
     }
 }
 

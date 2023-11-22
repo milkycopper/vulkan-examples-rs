@@ -17,6 +17,7 @@ use crate::{
     vulkan_objects::{Device, Instance, VulkanApiVersion},
 };
 
+#[derive(Clone, Copy)]
 pub struct ClearValue {
     pub color: vk::ClearValue,
     pub depth_stencil: vk::ClearValue,
