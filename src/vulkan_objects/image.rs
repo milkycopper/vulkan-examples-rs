@@ -273,43 +273,17 @@ impl Texture {
     /// TODO: support more types of layout transition
     pub fn transition_layout(
         &mut self,
+        command_buffer: vk::CommandBuffer,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
-        command_pool: &vk::CommandPool,
-        queue: &vk::Queue,
-    ) -> RenderResult<()> {
-        let (src_access_mask, dst_access_mask, src_stage_mask, dst_stage_mask) = if old_layout
-            == vk::ImageLayout::UNDEFINED
-            && new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
-        {
-            (
-                vk::AccessFlags::NONE,
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TRANSFER,
-            )
-        } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
-            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
-        {
-            (
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::AccessFlags::SHADER_READ,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-            )
-        } else {
-            return Err(RenderError::LayoutTransitionNotSupported(
-                "Unsupported layout transition".to_string(),
-            ));
-        };
-
-        let barrier = vk::ImageMemoryBarrier::builder()
-            .old_layout(old_layout)
-            .new_layout(new_layout)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(self.image)
-            .subresource_range(
+        src_stage_mask: vk::PipelineStageFlags,
+        dst_stage_mask: vk::PipelineStageFlags,
+    ) {
+        image_helper::set_image_layout(
+            &self.device,
+            command_buffer,
+            self.image,
+            Some(
                 vk::ImageSubresourceRange::builder()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .base_mip_level(0)
@@ -317,29 +291,13 @@ impl Texture {
                     .base_array_layer(0)
                     .level_count(self.mip_levels)
                     .build(),
-            )
-            .src_access_mask(src_access_mask)
-            .dst_access_mask(dst_access_mask)
-            .build();
-
-        OneTimeCommand::new(&self.device, command_pool)?.take_and_execute(
-            |command| unsafe {
-                self.device.cmd_pipeline_barrier(
-                    *command.command_buffer(),
-                    src_stage_mask,
-                    dst_stage_mask,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &[barrier],
-                );
-                Ok(())
-            },
-            queue,
-        )?;
+            ),
+            old_layout,
+            new_layout,
+            src_stage_mask,
+            dst_stage_mask,
+        );
         self.image_layout = new_layout;
-
-        Ok(())
     }
 
     pub fn from_rgba8_picture<P: AsRef<Path>>(
@@ -371,12 +329,15 @@ impl Texture {
         )
         .build()?;
 
+        let command = OneTimeCommand::new_and_begin(&device, command_pool)?;
+
         texture.transition_layout(
+            *command.command_buffer(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            command_pool,
-            queue,
-        )?;
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+        );
 
         let image_copy = vk::BufferImageCopy::builder()
             .image_subresource(
@@ -396,27 +357,25 @@ impl Texture {
                     .build(),
             )
             .build();
-
-        OneTimeCommand::new(&device, command_pool)?.take_and_execute(
-            |command| unsafe {
-                device.cmd_copy_buffer_to_image(
-                    *command.command_buffer(),
-                    staging_buffer.buffer(),
-                    texture.image,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    &[image_copy],
-                );
-                Ok(())
-            },
-            queue,
-        )?;
+        unsafe {
+            device.cmd_copy_buffer_to_image(
+                *command.command_buffer(),
+                staging_buffer.buffer(),
+                texture.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[image_copy],
+            );
+        }
 
         texture.transition_layout(
+            *command.command_buffer(),
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            command_pool,
-            queue,
-        )?;
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        );
+
+        command.end_and_submit(queue)?;
 
         Ok(texture)
     }
@@ -470,12 +429,15 @@ impl Texture {
         .array_layers(layer_count)
         .build()?;
 
+        let command = OneTimeCommand::new_and_begin(&device, command_pool)?;
+
         texture.transition_layout(
+            *command.command_buffer(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            command_pool,
-            queue,
-        )?;
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+        );
 
         let image_copies = (0..layer_count)
             .map(|layer| {
@@ -501,26 +463,25 @@ impl Texture {
             })
             .collect::<Vec<_>>();
 
-        OneTimeCommand::new(&device, command_pool)?.take_and_execute(
-            |command| unsafe {
-                device.cmd_copy_buffer_to_image(
-                    *command.command_buffer(),
-                    staging_buffer.buffer(),
-                    texture.image,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    &image_copies,
-                );
-                Ok(())
-            },
-            queue,
-        )?;
+        unsafe {
+            device.cmd_copy_buffer_to_image(
+                *command.command_buffer(),
+                staging_buffer.buffer(),
+                texture.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &image_copies,
+            );
+        }
 
         texture.transition_layout(
+            *command.command_buffer(),
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            command_pool,
-            queue,
-        )?;
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        );
+
+        command.end_and_submit(queue)?;
 
         Ok((texture, layer_count))
     }
@@ -622,6 +583,121 @@ pub mod image_helper {
             .build();
 
         unsafe { device.create_sampler(&create_info, None) }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_image_layout(
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        image: vk::Image,
+        subsource_range: Option<vk::ImageSubresourceRange>,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        src_stage_mask: vk::PipelineStageFlags,
+        dst_stage_mask: vk::PipelineStageFlags,
+    ) {
+        // Source access mask controls actions that have to be finished on the old layout
+        // before it will be transitioned to the new layout
+        let mut src_access_mask = match old_layout {
+            vk::ImageLayout::UNDEFINED => {
+                // Image layout is undefined (or does not matter)
+                // Only valid as initial layout
+                // No flags required, listed only for completeness
+                vk::AccessFlags::NONE
+            }
+            vk::ImageLayout::PREINITIALIZED => {
+                // Image is preinitialized
+                // Only valid as initial layout for linear images, preserves memory contents
+                // Make sure host writes have been finished
+                vk::AccessFlags::HOST_WRITE
+            }
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => {
+                // Image is a depth/stencil attachment
+                // Make sure any writes to the depth/stencil buffer have been finished
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+            }
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => {
+                // Image is a transfer source
+                // Make sure any reads from the image have been finished
+                vk::AccessFlags::TRANSFER_READ
+            }
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => {
+                // Image is a transfer destination
+                // Make sure any writes to the image have been finished
+                vk::AccessFlags::TRANSFER_WRITE
+            }
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
+                // Image is read by a shader
+                // Make sure any shader reads from the image have been finished
+                vk::AccessFlags::SHADER_READ
+            }
+            _ => unimplemented!(),
+        };
+        // Destination access mask controls the dependency for the new image layout
+        let dst_access_mask = match new_layout {
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => {
+                // Image will be used as a transfer destination
+                // Make sure any writes to the image have been finished
+                vk::AccessFlags::TRANSFER_WRITE
+            }
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => {
+                // Image will be used as a transfer source
+                // Make sure any reads from the image have been finished
+                vk::AccessFlags::TRANSFER_READ
+            }
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => {
+                // Image will be used as a color attachment
+                // Make sure any writes to the color buffer have been finished
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+            }
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => {
+                // Image layout will be used as a depth/stencil attachment
+                // Make sure any writes to depth/stencil buffer have been finished
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+            }
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
+                // Image will be read in a shader (sampler, input attachment)
+                // Make sure any writes to the image have been finished
+                if src_access_mask == vk::AccessFlags::NONE {
+                    src_access_mask = vk::AccessFlags::HOST_WRITE | vk::AccessFlags::TRANSFER_WRITE;
+                }
+                vk::AccessFlags::SHADER_READ
+            }
+            _ => unimplemented!(),
+        };
+
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(
+                subsource_range.unwrap_or(
+                    vk::ImageSubresourceRange::builder()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_mip_level(0)
+                        .layer_count(1)
+                        .base_array_layer(0)
+                        .level_count(1)
+                        .build(),
+                ),
+            )
+            .src_access_mask(src_access_mask)
+            .dst_access_mask(dst_access_mask)
+            .build();
+
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                src_stage_mask,
+                dst_stage_mask,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            )
+        }
     }
 }
 

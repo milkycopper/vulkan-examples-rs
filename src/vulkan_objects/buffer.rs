@@ -92,7 +92,7 @@ impl<T> Buffer<T> {
         self.alignment
     }
 
-    pub fn mapped(&self) -> bool {
+    pub fn is_mapped(&self) -> bool {
         self.mapped_ptr.is_some()
     }
 
@@ -117,7 +117,7 @@ impl<T> Buffer<T> {
         offset: vk::DeviceSize,
         size_in_bytes: vk::DeviceSize,
     ) -> VkResult<*mut c_void> {
-        assert!(!self.mapped());
+        assert!(!self.is_mapped());
         assert!(offset + size_in_bytes <= self.size_in_bytes);
         unsafe {
             let ptr = self.device.map_memory(
@@ -136,7 +136,7 @@ impl<T> Buffer<T> {
     }
 
     pub fn unmap_memory(&mut self) {
-        assert!(self.mapped());
+        assert!(self.is_mapped());
         unsafe { self.device.unmap_memory(self.device_momory) };
         self.mapped_ptr.take();
     }
@@ -205,11 +205,29 @@ impl<T> Buffer<T> {
 
         Ok(device_local_buffer)
     }
+
+    pub fn flush(&self) -> VkResult<()> {
+        assert!(
+            self.properties & vk::MemoryPropertyFlags::HOST_COHERENT
+                != vk::MemoryPropertyFlags::HOST_COHERENT
+        );
+        assert!(self.is_mapped());
+        unsafe {
+            self.device
+                .flush_mapped_memory_ranges(&[vk::MappedMemoryRange::builder()
+                    .offset(0)
+                    .memory(self.device_momory)
+                    .build()])
+        }
+    }
 }
 
 impl<T> Drop for Buffer<T> {
     fn drop(&mut self) {
         unsafe {
+            if self.is_mapped() {
+                self.unmap_memory();
+            }
             self.device.destroy_buffer(self.buffer, None);
             self.device.free_memory(self.device_momory, None);
         }
