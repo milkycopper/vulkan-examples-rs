@@ -220,16 +220,18 @@ pub trait WindowApp {
     }
 
     fn create_descriptor_pool(device: &Device) -> RenderResult<vk::DescriptorPool> {
+        let pool_sizes = Self::descriptor_pool_sizes();
         let create_info = vk::DescriptorPoolCreateInfo::builder()
-            .pool_sizes(&Self::descriptor_pool_sizes())
+            .pool_sizes(&pool_sizes)
             .max_sets(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
             .build();
         Ok(unsafe { device.create_descriptor_pool(&create_info, None)? })
     }
 
     fn create_descriptor_set_layout(device: &Device) -> RenderResult<vk::DescriptorSetLayout> {
+        let bindings = Self::descriptor_set_layout_bindings();
         let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&Self::descriptor_set_layout_bindings())
+            .bindings(&bindings)
             .build();
         Ok(unsafe {
             device.create_descriptor_set_layout(&descriptor_set_layout_create_info, None)?
