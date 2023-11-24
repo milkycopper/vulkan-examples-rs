@@ -1,11 +1,11 @@
-use std::{cell::RefCell, ffi::c_void, rc::Rc, time::SystemTime};
+use std::{cell::RefCell, ffi::c_void, rc::Rc};
 
 use ash::vk;
 use glam::{vec3, Mat4, Vec3};
 use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 
 use vulkan_example_rs::{
-    app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
+    app::{FixedVulkanStuff, FrameCounter, PipelineBuilder, UIOverlay, WindowApp},
     camera::Camera,
     impl_drop_trait, impl_window_fns,
     mesh::Vertex,
@@ -17,8 +17,8 @@ struct DrawTriangleApp {
     window: Window,
     window_resized: bool,
 
-    current_frame: usize,
-    last_frame_time_stamp: SystemTime,
+    frame_counter: FrameCounter,
+    ui_overlay: UIOverlay,
 
     camera: Camera,
 
@@ -107,6 +107,14 @@ impl WindowApp for DrawTriangleApp {
             }
         }
 
+        let ui_overlay = UIOverlay::new(
+            fixed_vulkan_stuff.pipeline_cache,
+            fixed_vulkan_stuff.render_pass,
+            1.0,
+            fixed_vulkan_stuff.device.clone(),
+        )
+        .unwrap();
+
         DrawTriangleApp {
             window,
             window_resized: false,
@@ -116,14 +124,14 @@ impl WindowApp for DrawTriangleApp {
             uniform_buffers,
             pipeline_layout,
             pipeline,
-            current_frame: 0,
-            last_frame_time_stamp: SystemTime::now(),
+            frame_counter: FrameCounter::default(),
             camera: Camera::with_translation(Vec3::new(0., 0., -3.))
                 .with_move_speed(100.)
                 .with_rotate_speed(400.),
             descriptor_set_layout,
             descriptor_pool,
             descriptor_sets,
+            ui_overlay,
         }
     }
 
@@ -131,7 +139,7 @@ impl WindowApp for DrawTriangleApp {
         let image_index = {
             let ret = self
                 .fixed_vulkan_stuff
-                .frame_get_image_index_to_draw(self.current_frame, &self.window)
+                .frame_get_image_index_to_draw(self.frame_counter.double_buffer_frame, &self.window)
                 .unwrap();
             if ret.1 {
                 return;
@@ -139,27 +147,36 @@ impl WindowApp for DrawTriangleApp {
             ret.0
         };
 
-        self.update_uniform_buffer(&self.camera, &self.uniform_buffers[self.current_frame]);
+        self.update_uniform_buffer(
+            &self.camera,
+            &self.uniform_buffers[self.frame_counter.double_buffer_frame],
+        );
+
+        let name = self
+            .fixed_vulkan_stuff
+            .device
+            .physical_device_name()
+            .to_owned();
+        self.update_ui(&[name]);
 
         self.record_render_commands(
-            self.fixed_vulkan_stuff.graphic_command_buffers[self.current_frame],
+            self.fixed_vulkan_stuff.graphic_command_buffers[self.frame_counter.double_buffer_frame],
             self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
-            self.descriptor_sets[self.current_frame],
+            self.descriptor_sets[self.frame_counter.double_buffer_frame],
             6,
         );
 
         self.window_resized = self
             .fixed_vulkan_stuff
             .frame_queue_submit_and_present(
-                self.current_frame,
+                self.frame_counter.double_buffer_frame,
                 image_index,
                 &self.window,
                 self.window_resized,
             )
             .unwrap();
 
-        self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
-        self.last_frame_time_stamp = SystemTime::now();
+        self.frame_counter.update();
     }
 
     fn descriptor_pool_sizes() -> Vec<vk::DescriptorPoolSize> {
@@ -203,7 +220,7 @@ impl DrawTriangleApp {
     }
 
     fn record_render_commands(
-        &self,
+        &mut self,
         command_buffer: vk::CommandBuffer,
         frame_buffer: vk::Framebuffer,
         descriptor_set: vk::DescriptorSet,
@@ -260,6 +277,9 @@ impl DrawTriangleApp {
             self.fixed_vulkan_stuff
                 .device
                 .cmd_draw_indexed(command_buffer, indice_num, 1, 0, 0, 0);
+
+            self.ui_overlay
+                .draw(command_buffer, self.frame_counter.double_buffer_frame);
 
             self.fixed_vulkan_stuff
                 .device

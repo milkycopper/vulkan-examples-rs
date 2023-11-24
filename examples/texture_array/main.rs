@@ -1,11 +1,11 @@
-use std::{cell::RefCell, ffi::c_void, rc::Rc, time::SystemTime};
+use std::{cell::RefCell, ffi::c_void, rc::Rc};
 
 use ash::vk;
 use glam::{vec3, Mat4, Quat, Vec3, Vec4};
 use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 
 use vulkan_example_rs::{
-    app::{FixedVulkanStuff, PipelineBuilder, WindowApp},
+    app::{FixedVulkanStuff, FrameCounter, PipelineBuilder, UIOverlay, WindowApp},
     camera::Camera,
     impl_drop_trait, impl_window_fns,
     mesh::Vertex,
@@ -18,8 +18,7 @@ struct TextureArrayExample {
     window: Window,
     window_resized: bool,
 
-    current_frame: usize,
-    last_frame_time_stamp: SystemTime,
+    frame_counter: FrameCounter,
 
     model_vertices: Vec<Vertex>,
     model_indices: Vec<u32>,
@@ -38,6 +37,8 @@ struct TextureArrayExample {
     #[allow(dead_code)]
     texture_image: Texture,
     layer_count: u32,
+
+    ui_overlay: UIOverlay,
 }
 
 impl WindowApp for TextureArrayExample {
@@ -47,7 +48,7 @@ impl WindowApp for TextureArrayExample {
         let image_index = {
             let ret = self
                 .fixed_vulkan_stuff
-                .frame_get_image_index_to_draw(self.current_frame, &self.window)
+                .frame_get_image_index_to_draw(self.frame_counter.double_buffer_frame, &self.window)
                 .unwrap();
             if ret.1 {
                 return;
@@ -55,12 +56,22 @@ impl WindowApp for TextureArrayExample {
             ret.0
         };
 
-        self.update_uniform_buffer(&self.camera, &self.uniform_buffers[self.current_frame]);
+        self.update_uniform_buffer(
+            &self.camera,
+            &self.uniform_buffers[self.frame_counter.double_buffer_frame],
+        );
+
+        let name = self
+            .fixed_vulkan_stuff
+            .device
+            .physical_device_name()
+            .to_owned();
+        self.update_ui(&[name]);
 
         self.record_render_commands(
-            self.fixed_vulkan_stuff.graphic_command_buffers[self.current_frame],
+            self.fixed_vulkan_stuff.graphic_command_buffers[self.frame_counter.double_buffer_frame],
             self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
-            self.descriptor_sets[self.current_frame],
+            self.descriptor_sets[self.frame_counter.double_buffer_frame],
             self.model_vertices.len() as u32,
             self.model_indices.len() as u32,
         );
@@ -68,15 +79,14 @@ impl WindowApp for TextureArrayExample {
         self.window_resized = self
             .fixed_vulkan_stuff
             .frame_queue_submit_and_present(
-                self.current_frame,
+                self.frame_counter.double_buffer_frame,
                 image_index,
                 &self.window,
                 self.window_resized,
             )
             .unwrap();
 
-        self.current_frame = (self.current_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
-        self.last_frame_time_stamp = SystemTime::now();
+        self.frame_counter.update();
     }
 
     fn new(event_loop: &EventLoop<()>) -> Self {
@@ -264,12 +274,19 @@ impl WindowApp for TextureArrayExample {
             }
         }
 
+        let ui_overlay = UIOverlay::new(
+            fixed_vulkan_stuff.pipeline_cache,
+            fixed_vulkan_stuff.render_pass,
+            1.0,
+            fixed_vulkan_stuff.device.clone(),
+        )
+        .unwrap();
+
         TextureArrayExample {
             window,
             window_resized: false,
 
-            current_frame: 0,
-            last_frame_time_stamp: SystemTime::now(),
+            frame_counter: FrameCounter::default(),
 
             model_vertices,
             model_indices,
@@ -288,6 +305,7 @@ impl WindowApp for TextureArrayExample {
             uniform_buffers,
             texture_image,
             layer_count,
+            ui_overlay,
         }
     }
 
@@ -337,7 +355,7 @@ impl TextureArrayExample {
     }
 
     fn record_render_commands(
-        &self,
+        &mut self,
         command_buffer: vk::CommandBuffer,
         frame_buffer: vk::Framebuffer,
         descriptor_set: vk::DescriptorSet,
@@ -400,6 +418,9 @@ impl TextureArrayExample {
                 0,
                 0,
             );
+
+            self.ui_overlay
+                .draw(command_buffer, self.frame_counter.double_buffer_frame);
 
             self.fixed_vulkan_stuff
                 .device

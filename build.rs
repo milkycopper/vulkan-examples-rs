@@ -6,7 +6,7 @@ use std::process::Command;
 const GLSL_COMPILER_PATH: &str = "/Users/hahaliu/VulkanSDK/1.3.261.1/macOS/bin/glslc";
 #[cfg(target_os = "windows")]
 const GLSL_COMPILER_PATH: &str = "C:/VulkanSDK/1.3.261.1/Bin/glslc.exe";
-const SHADER_SRC_DIRS: [&str; 2] = ["src/shaders", "examples/shaders"];
+const SHADER_SRC_DIRS: [&str; 3] = ["src/shaders", "src/app/shaders", "examples/shaders"];
 
 fn shader_paths_in_dir<P: AsRef<Path>>(dir: &P) -> Vec<PathBuf> {
     let mut shader_paths = vec![];

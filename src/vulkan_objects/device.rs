@@ -12,6 +12,7 @@ pub struct Device {
     instance: Rc<Instance>,
     physical_device: Weak<vk::PhysicalDevice>,
     queue_state: QueueState,
+    physical_device_name: String,
 }
 
 impl Device {
@@ -60,16 +61,30 @@ impl Device {
             }
         };
 
+        let physical_device_name = format!("{:?}", unsafe {
+            std::ffi::CStr::from_ptr(
+                instance
+                    .get_physical_device_properties(*physical_device.upgrade().unwrap())
+                    .device_name
+                    .as_ptr(),
+            )
+        });
+
         Ok(Self {
             inner,
             instance,
             physical_device,
             queue_state,
+            physical_device_name,
         })
     }
 
     pub fn instance(&self) -> &Rc<Instance> {
         &self.instance
+    }
+
+    pub fn physical_device_name(&self) -> &str {
+        &self.physical_device_name
     }
 
     pub fn physical_device(&self) -> &Weak<vk::PhysicalDevice> {
