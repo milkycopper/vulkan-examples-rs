@@ -7,6 +7,7 @@ use imgui::{Context, DrawCmd, DrawIdx, DrawVert, FontSource, StyleColor};
 use super::{FixedVulkanStuff, PipelineBuilder};
 use crate::{
     error::{RenderError, RenderResult},
+    impl_pipeline_builder_fns,
     vulkan_objects::{Buffer, Device, OneTimeCommand, Texture},
 };
 
@@ -136,53 +137,56 @@ impl UIOverlay {
             )?;
             staging_buffer.load_data(&tex_data, 0)?;
 
-            let command = OneTimeCommand::new_and_begin(&device, &command_pool)?;
+            OneTimeCommand::new(&device, &command_pool)?.take_and_execute(
+                |command_buffer| {
+                    texture.transition_layout(
+                        command_buffer,
+                        vk::ImageLayout::UNDEFINED,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::PipelineStageFlags::HOST,
+                        vk::PipelineStageFlags::TRANSFER,
+                    );
 
-            texture.transition_layout(
-                *command.command_buffer(),
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::PipelineStageFlags::HOST,
-                vk::PipelineStageFlags::TRANSFER,
-            );
+                    let image_copy = vk::BufferImageCopy::builder()
+                        .image_subresource(
+                            vk::ImageSubresourceLayers::builder()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .mip_level(0)
+                                .base_array_layer(0)
+                                .layer_count(1)
+                                .build(),
+                        )
+                        .image_offset(vk::Offset3D::default())
+                        .image_extent(
+                            vk::Extent3D::builder()
+                                .width(tex_width)
+                                .height(tex_height)
+                                .depth(1)
+                                .build(),
+                        )
+                        .build();
+                    unsafe {
+                        device.cmd_copy_buffer_to_image(
+                            command_buffer,
+                            staging_buffer.buffer(),
+                            *texture.image(),
+                            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                            &[image_copy],
+                        );
+                    }
 
-            let image_copy = vk::BufferImageCopy::builder()
-                .image_subresource(
-                    vk::ImageSubresourceLayers::builder()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .mip_level(0)
-                        .base_array_layer(0)
-                        .layer_count(1)
-                        .build(),
-                )
-                .image_offset(vk::Offset3D::default())
-                .image_extent(
-                    vk::Extent3D::builder()
-                        .width(tex_width)
-                        .height(tex_height)
-                        .depth(1)
-                        .build(),
-                )
-                .build();
-            unsafe {
-                device.cmd_copy_buffer_to_image(
-                    *command.command_buffer(),
-                    staging_buffer.buffer(),
-                    *texture.image(),
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    &[image_copy],
-                );
-            }
+                    texture.transition_layout(
+                        command_buffer,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    );
 
-            texture.transition_layout(
-                *command.command_buffer(),
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-            );
-
-            command.end_and_submit(&device.graphic_queue())?;
+                    Ok(())
+                },
+                &device.graphic_queue(),
+            )?;
 
             texture.spawn_image_view()?;
 
@@ -209,7 +213,7 @@ impl UIOverlay {
                     .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .build()])
-                .max_sets(2)
+                .max_sets(FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u32)
                 .build();
             unsafe { device.create_descriptor_pool(&create_info, None)? }
         };
@@ -326,17 +330,19 @@ impl UIOverlay {
             update_command_buffers = true;
         }
 
-        // TODO: load all data by once
+        self.vertex_buffers[frame_index].map_memory_all()?;
+        self.indice_buffers[frame_index].map_memory_all()?;
+
         let (mut vertex_offset, mut indice_offset) = (0, 0);
         for draw_list in draw_data.draw_lists() {
-            self.vertex_buffers[frame_index].load_data(draw_list.vtx_buffer(), vertex_offset)?;
+            self.vertex_buffers[frame_index]
+                .load_data_when_mapped(draw_list.vtx_buffer(), vertex_offset);
             vertex_offset += draw_list.vtx_buffer().len() as u64;
-            self.indice_buffers[frame_index].load_data(draw_list.idx_buffer(), indice_offset)?;
+            self.indice_buffers[frame_index]
+                .load_data_when_mapped(draw_list.idx_buffer(), indice_offset);
             indice_offset += draw_list.idx_buffer().len() as u64
         }
 
-        self.vertex_buffers[frame_index].map_memory_all()?;
-        self.indice_buffers[frame_index].map_memory_all()?;
         self.vertex_buffers[frame_index].flush()?;
         self.indice_buffers[frame_index].flush()?;
         self.vertex_buffers[frame_index].unmap_memory();
@@ -477,32 +483,15 @@ struct PipelineCreator<'a> {
     pipeline_cache: vk::PipelineCache,
 }
 
-impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
-    fn device(&self) -> Rc<Device> {
-        self.device.clone()
-    }
-    fn vertex_spv_path(&self) -> String {
-        "src/app/shaders/uioverlay.vert.spv".to_string()
+impl<'a> PipelineBuilder<'a, &'a str> for PipelineCreator<'a> {
+    impl_pipeline_builder_fns!();
+
+    fn vertex_spv_path(&self) -> &'a str {
+        "src/app/shaders/uioverlay.vert.spv"
     }
 
-    fn frag_spv_path(&self) -> String {
-        "src/app/shaders/uioverlay.frag.spv".to_string()
-    }
-
-    fn extent(&self) -> vk::Extent2D {
-        self.extent
-    }
-
-    fn render_pass(&self) -> vk::RenderPass {
-        self.render_pass
-    }
-
-    fn subpass(&self) -> u32 {
-        0
-    }
-
-    fn pipeline_cache(&self) -> vk::PipelineCache {
-        self.pipeline_cache
+    fn frag_spv_path(&self) -> &'a str {
+        "src/app/shaders/uioverlay.frag.spv"
     }
 
     fn pipeline_layout(&self) -> vk::PipelineLayout {
@@ -519,14 +508,6 @@ impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
                 .create_pipeline_layout(&pipeline_layout_info, None)
                 .unwrap()
         }
-    }
-
-    fn vertex_binding_descriptions(&self) -> &'a [vk::VertexInputBindingDescription] {
-        self.vertex_bindings
-    }
-
-    fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription] {
-        self.vertex_attributes
     }
 
     fn rasterization_state_create_info(&self) -> vk::PipelineRasterizationStateCreateInfo {

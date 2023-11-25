@@ -160,7 +160,7 @@ macro_rules! impl_pipeline_builder_fns {
         }
 
         fn extent(&self) -> vk::Extent2D {
-            self.surface.extent()
+            self.extent
         }
 
         fn render_pass(&self) -> vk::RenderPass {

@@ -29,21 +29,21 @@ impl ClearValue {
 }
 
 pub struct FrameCounter {
-    pub frame_count: u64,
     pub double_buffer_frame: usize,
-    pub last_frame_time_stamp: SystemTime,
-    pub last_frame_fps: u32,
-    fps_update_delay: u64,
+    pub frame_count: u64,
+    pub last_fps_update_time_stamp: SystemTime,
+    pub fps: f64,
+    pub fps_update_delay: u64,
 }
 
 impl FrameCounter {
     pub fn new(fps_update_delay: usize) -> Self {
         assert!(fps_update_delay > 0);
         Self {
-            frame_count: 0,
             double_buffer_frame: 0,
-            last_frame_time_stamp: SystemTime::now(),
-            last_frame_fps: 0,
+            frame_count: 0,
+            last_fps_update_time_stamp: SystemTime::now(),
+            fps: 0.,
             fps_update_delay: fps_update_delay as u64,
         }
     }
@@ -52,16 +52,20 @@ impl FrameCounter {
         self.frame_count += 1;
         self.double_buffer_frame =
             (self.double_buffer_frame + 1) % FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT;
-        self.frame_count %= self.fps_update_delay;
-        if self.frame_count == 0 {
+
+        if self.count_since_last_update() == 0 {
             let now = SystemTime::now();
             let duration = now
-                .duration_since(self.last_frame_time_stamp)
+                .duration_since(self.last_fps_update_time_stamp)
                 .unwrap()
                 .as_secs_f64();
-            self.last_frame_fps = (self.fps_update_delay as f64 / duration) as u32;
-            self.last_frame_time_stamp = now;
+            self.fps = self.fps_update_delay as f64 / duration;
+            self.last_fps_update_time_stamp = now;
         }
+    }
+
+    pub fn count_since_last_update(&self) -> u64 {
+        self.frame_count % self.fps_update_delay
     }
 }
 
@@ -87,16 +91,21 @@ pub trait WindowApp {
     fn descriptor_set_layout_bindings() -> Vec<DescriptorSetLayoutBinding>;
 
     fn update_ui<T: AsRef<str>>(&mut self, infos: &[T]) {
-        let fps = self.frame_counter().last_frame_fps;
-        let double_buffer_frame = self.frame_counter().double_buffer_frame;
-        self.ui().imgui_context.io_mut().display_size = self.window_size().into();
-        let ui = self.ui().imgui_context.new_frame();
-        ui.window("Vulkan Examples").build(|| {
-            ui.text(Self::window_title());
-            infos.iter().for_each(|info| ui.text(info));
-            ui.text(format!("fps: {fps}"));
-        });
-        self.ui().update(double_buffer_frame).unwrap();
+        if self.frame_counter().frame_count < self.frame_counter().fps_update_delay
+            || self.frame_counter().count_since_last_update()
+                < FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT as u64
+        {
+            let fps = self.frame_counter().fps;
+            let double_buffer_frame = self.frame_counter().double_buffer_frame;
+            self.ui().imgui_context.io_mut().display_size = self.window_size().into();
+            let ui = self.ui().imgui_context.new_frame();
+            ui.window("Vulkan Examples").build(|| {
+                ui.text(Self::window_title());
+                infos.iter().for_each(|info| ui.text(info));
+                ui.text(format!("fps: {fps:.2}"));
+            });
+            self.ui().update(double_buffer_frame).unwrap();
+        }
     }
 
     fn window_size(&self) -> PhysicalSize<u32> {
@@ -184,10 +193,10 @@ pub trait WindowApp {
 
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
         let duration = SystemTime::now()
-            .duration_since(self.frame_counter().last_frame_time_stamp)
+            .duration_since(self.frame_counter().last_fps_update_time_stamp)
             .unwrap()
             .as_secs_f32()
-            / (self.frame_counter().frame_count + 1) as f32;
+            / (self.frame_counter().count_since_last_update() + 1) as f32;
         match key_code {
             VirtualKeyCode::W => self.camera().translate_in_time(Direction::Up, duration),
             VirtualKeyCode::S => self.camera().translate_in_time(Direction::Down, duration),

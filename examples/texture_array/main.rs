@@ -9,7 +9,7 @@ use vulkan_example_rs::{
     camera::Camera,
     impl_drop_trait, impl_pipeline_builder_fns, impl_window_fns,
     mesh::Vertex,
-    vulkan_objects::{Buffer, Device, Surface, Texture},
+    vulkan_objects::{Buffer, Device, Texture},
 };
 
 const MAX_ARRAY_COUNT: usize = 8;
@@ -222,7 +222,7 @@ impl WindowApp for TextureArrayExample {
 
         let pipeline_creator = PipelineCreator {
             device: fixed_vulkan_stuff.device.clone(),
-            surface: &fixed_vulkan_stuff.surface,
+            extent: fixed_vulkan_stuff.surface.extent(),
             render_pass: fixed_vulkan_stuff.render_pass,
             set_layouts: &[descriptor_set_layout],
             vertex_bindings: &[Vertex::binding_description()],
@@ -431,7 +431,7 @@ impl_drop_trait!(TextureArrayExample);
 
 struct PipelineCreator<'a> {
     device: Rc<Device>,
-    surface: &'a Surface,
+    extent: vk::Extent2D,
     render_pass: vk::RenderPass,
     set_layouts: &'a [vk::DescriptorSetLayout],
     vertex_bindings: &'a [vk::VertexInputBindingDescription],
