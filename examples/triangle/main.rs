@@ -7,7 +7,7 @@ use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 use vulkan_example_rs::{
     app::{FixedVulkanStuff, FrameCounter, PipelineBuilder, UIOverlay, WindowApp},
     camera::{Camera, MVPMatrix},
-    impl_drop_trait, impl_window_fns,
+    impl_drop_trait, impl_pipeline_builder_fns, impl_window_fns,
     mesh::Vertex,
     vulkan_objects::{Buffer, Device, Surface},
 };
@@ -303,32 +303,15 @@ struct PipelineCreator<'a> {
     pipeline_cache: vk::PipelineCache,
 }
 
-impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
-    fn device(&self) -> Rc<Device> {
-        self.device.clone()
-    }
-    fn vertex_spv_path(&self) -> String {
-        "examples/shaders/triangle/shader.vert.spv".to_string()
+impl<'a> PipelineBuilder<'a, &'a str> for PipelineCreator<'a> {
+    impl_pipeline_builder_fns!();
+
+    fn vertex_spv_path(&self) -> &'a str {
+        "examples/shaders/triangle/shader.vert.spv"
     }
 
-    fn frag_spv_path(&self) -> String {
-        "examples/shaders/triangle/shader.frag.spv".to_string()
-    }
-
-    fn extent(&self) -> vk::Extent2D {
-        self.surface.extent()
-    }
-
-    fn render_pass(&self) -> vk::RenderPass {
-        self.render_pass
-    }
-
-    fn subpass(&self) -> u32 {
-        0
-    }
-
-    fn pipeline_cache(&self) -> vk::PipelineCache {
-        self.pipeline_cache
+    fn frag_spv_path(&self) -> &'a str {
+        "examples/shaders/triangle/shader.frag.spv"
     }
 
     fn pipeline_layout(&self) -> vk::PipelineLayout {
@@ -341,14 +324,6 @@ impl<'a> PipelineBuilder<'a, String> for PipelineCreator<'a> {
                 .create_pipeline_layout(&pipeline_layout_info, None)
                 .unwrap()
         }
-    }
-
-    fn vertex_binding_descriptions(&self) -> &'a [vk::VertexInputBindingDescription] {
-        self.vertex_bindings
-    }
-
-    fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription] {
-        self.vertex_attributes
     }
 }
 

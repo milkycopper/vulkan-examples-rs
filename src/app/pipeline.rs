@@ -13,10 +13,13 @@ pub trait PipelineBuilder<'a, P: AsRef<Path>> {
     fn frag_spv_path(&self) -> P;
     fn extent(&self) -> vk::Extent2D;
     fn render_pass(&self) -> vk::RenderPass;
-    fn subpass(&self) -> u32;
     fn vertex_binding_descriptions(&self) -> &'a [vk::VertexInputBindingDescription];
     fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription];
     fn pipeline_layout(&self) -> vk::PipelineLayout;
+
+    fn subpass(&self) -> u32 {
+        0
+    }
 
     fn pipeline_cache(&self) -> vk::PipelineCache {
         vk::PipelineCache::null()
@@ -148,3 +151,34 @@ pub trait PipelineBuilder<'a, P: AsRef<Path>> {
         Ok((layout, pipeline))
     }
 }
+
+#[macro_export]
+macro_rules! impl_pipeline_builder_fns {
+    () => {
+        fn device(&self) -> Rc<Device> {
+            self.device.clone()
+        }
+
+        fn extent(&self) -> vk::Extent2D {
+            self.surface.extent()
+        }
+
+        fn render_pass(&self) -> vk::RenderPass {
+            self.render_pass
+        }
+
+        fn pipeline_cache(&self) -> vk::PipelineCache {
+            self.pipeline_cache
+        }
+
+        fn vertex_binding_descriptions(&self) -> &'a [vk::VertexInputBindingDescription] {
+            self.vertex_bindings
+        }
+
+        fn vertex_attribute_descriptions(&self) -> &'a [vk::VertexInputAttributeDescription] {
+            self.vertex_attributes
+        }
+    };
+}
+
+pub use impl_pipeline_builder_fns;
