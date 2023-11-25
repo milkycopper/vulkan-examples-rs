@@ -19,6 +19,7 @@ struct VikingRoomApp {
     frame_counter: FrameCounter,
     ui_overlay: UIOverlay,
 
+    #[allow(dead_code)]
     model_vertices: Vec<Vertex>,
     model_indices: Vec<u32>,
 
@@ -65,10 +66,9 @@ impl WindowApp for VikingRoomApp {
         self.update_ui(&[name]);
 
         self.record_render_commands(
-            self.fixed_vulkan_stuff.graphic_command_buffers[self.frame_counter.double_buffer_frame],
-            self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
+            self.frame_counter.double_buffer_frame,
+            image_index,
             self.descriptor_sets[self.frame_counter.double_buffer_frame],
-            self.model_vertices.len() as u32,
             self.model_indices.len() as u32,
         );
 
@@ -115,23 +115,12 @@ impl WindowApp for VikingRoomApp {
 
         let (pipeline_layout, pipeline) = pipeline_creator.build().unwrap();
 
-        let vertex_buffer = Buffer::new_device_local(
-            &model_vertices,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            fixed_vulkan_stuff.device.clone(),
-            &fixed_vulkan_stuff.graphic_command_pool,
-            &fixed_vulkan_stuff.device.graphic_queue(),
-        )
-        .unwrap();
-
-        let indice_buffer = Buffer::new_device_local(
-            &model_indices,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            fixed_vulkan_stuff.device.clone(),
-            &fixed_vulkan_stuff.graphic_command_pool,
-            &fixed_vulkan_stuff.device.graphic_queue(),
-        )
-        .unwrap();
+        let vertex_buffer = fixed_vulkan_stuff
+            .device_local_vertex_buffer(&model_vertices)
+            .unwrap();
+        let indice_buffer = fixed_vulkan_stuff
+            .device_local_indice_buffer(&model_indices)
+            .unwrap();
 
         let uniform_buffers: [_; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
             array_init::array_init(|_| {
@@ -274,12 +263,12 @@ impl VikingRoomApp {
 
     fn record_render_commands(
         &mut self,
-        command_buffer: vk::CommandBuffer,
-        frame_buffer: vk::Framebuffer,
+        frame_index: usize,
+        image_index: usize,
         descriptor_set: vk::DescriptorSet,
-        _vertex_num: u32,
         indice_num: u32,
     ) {
+        let command_buffer = self.fixed_vulkan_stuff.graphic_command_buffers[frame_index];
         unsafe {
             self.fixed_vulkan_stuff
                 .device
@@ -292,8 +281,8 @@ impl VikingRoomApp {
                 .expect("Fail to begin command buffer");
 
             self.fixed_vulkan_stuff.cmd_begin_renderpass(
-                command_buffer,
-                frame_buffer,
+                frame_index,
+                image_index,
                 &Self::clear_value(),
             );
 
@@ -317,7 +306,7 @@ impl VikingRoomApp {
             );
 
             self.fixed_vulkan_stuff
-                .cmd_set_viewport_and_scissor(command_buffer);
+                .cmd_set_viewport_and_scissor(frame_index);
 
             self.fixed_vulkan_stuff.device.cmd_bind_descriptor_sets(
                 command_buffer,

@@ -20,6 +20,7 @@ struct TextureArrayExample {
 
     frame_counter: FrameCounter,
 
+    #[allow(dead_code)]
     model_vertices: Vec<Vertex>,
     model_indices: Vec<u32>,
 
@@ -69,10 +70,9 @@ impl WindowApp for TextureArrayExample {
         self.update_ui(&[name]);
 
         self.record_render_commands(
-            self.fixed_vulkan_stuff.graphic_command_buffers[self.frame_counter.double_buffer_frame],
-            self.fixed_vulkan_stuff.swapchain_framebuffers[image_index as usize],
+            self.frame_counter.double_buffer_frame,
+            image_index,
             self.descriptor_sets[self.frame_counter.double_buffer_frame],
-            self.model_vertices.len() as u32,
             self.model_indices.len() as u32,
         );
 
@@ -177,22 +177,12 @@ impl WindowApp for TextureArrayExample {
             0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16,
             17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
         ];
-        let vertex_buffer = Buffer::new_device_local(
-            &model_vertices,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            fixed_vulkan_stuff.device.clone(),
-            &fixed_vulkan_stuff.graphic_command_pool,
-            &fixed_vulkan_stuff.device.graphic_queue(),
-        )
-        .unwrap();
-        let indice_buffer = Buffer::new_device_local(
-            &model_indices,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            fixed_vulkan_stuff.device.clone(),
-            &fixed_vulkan_stuff.graphic_command_pool,
-            &fixed_vulkan_stuff.device.graphic_queue(),
-        )
-        .unwrap();
+        let vertex_buffer = fixed_vulkan_stuff
+            .device_local_vertex_buffer(&model_vertices)
+            .unwrap();
+        let indice_buffer = fixed_vulkan_stuff
+            .device_local_indice_buffer(&model_indices)
+            .unwrap();
 
         let uniform_buffers: [(Buffer<Ubo>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
             array_init::array_init(|_| {
@@ -360,12 +350,12 @@ impl TextureArrayExample {
 
     fn record_render_commands(
         &mut self,
-        command_buffer: vk::CommandBuffer,
-        frame_buffer: vk::Framebuffer,
+        frame_index: usize,
+        image_index: usize,
         descriptor_set: vk::DescriptorSet,
-        _vertex_num: u32,
         indice_num: u32,
     ) {
+        let command_buffer = self.fixed_vulkan_stuff.graphic_command_buffers[frame_index];
         unsafe {
             self.fixed_vulkan_stuff
                 .device
@@ -378,8 +368,8 @@ impl TextureArrayExample {
                 .expect("Fail to begin command buffer");
 
             self.fixed_vulkan_stuff.cmd_begin_renderpass(
-                command_buffer,
-                frame_buffer,
+                frame_index,
+                image_index,
                 &Self::clear_value(),
             );
 
@@ -403,7 +393,7 @@ impl TextureArrayExample {
             );
 
             self.fixed_vulkan_stuff
-                .cmd_set_viewport_and_scissor(command_buffer);
+                .cmd_set_viewport_and_scissor(frame_index);
 
             self.fixed_vulkan_stuff.device.cmd_bind_descriptor_sets(
                 command_buffer,

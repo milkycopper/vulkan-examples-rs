@@ -6,7 +6,7 @@ use winit::window::Window;
 use crate::{
     error::{RenderError, RenderResult},
     vulkan_objects::{
-        extent_helper, DepthStencil, Device, Instance, QueueInfo, Surface, SwapChainBatch,
+        extent_helper, Buffer, DepthStencil, Device, Instance, QueueInfo, Surface, SwapChainBatch,
     },
 };
 
@@ -78,8 +78,11 @@ impl FixedVulkanStuff {
                     }
                 })
             })?;
-        let depth_format = DepthStencil::find_depth_format(&device)?;
-        let depth_stencil = DepthStencil::new(surface.extent(), depth_format, device.clone())?;
+        let depth_stencil = DepthStencil::new(
+            surface.extent(),
+            DepthStencil::find_depth_format(&device)?,
+            device.clone(),
+        )?;
         let render_pass = create_renderpass(surface.format(), depth_stencil.format(), &device)?;
         let swapchain_framebuffers = create_swapchain_frame_buffer(
             &swapchain_batch,
@@ -105,7 +108,7 @@ impl FixedVulkanStuff {
         })
     }
 
-    pub fn recreate(&mut self, window: &Window) -> RenderResult<()> {
+    pub fn refit_window(&mut self, window: &Window) -> RenderResult<()> {
         unsafe {
             self.device.device_wait_idle()?;
             self.surface.refit_surface_attribute(window)?;
@@ -129,7 +132,7 @@ impl FixedVulkanStuff {
         }
     }
 
-    pub fn frame_wait_for_fence(&self, frame_index: usize) -> VkResult<()> {
+    pub fn frame_wait_last_finished(&self, frame_index: usize) -> VkResult<()> {
         debug_assert!(frame_index < Self::MAX_FRAMES_IN_FLIGHT);
         unsafe {
             self.device.wait_for_fences(
@@ -172,11 +175,11 @@ impl FixedVulkanStuff {
         }
     }
 
-    pub fn frame_queue_present(&self, frame_index: usize, image_index: u32) -> VkResult<bool> {
+    pub fn frame_queue_present(&self, frame_index: usize, image_index: usize) -> VkResult<bool> {
         debug_assert!(frame_index < Self::MAX_FRAMES_IN_FLIGHT);
-        debug_assert!((image_index as usize) < self.swapchain_batch.images().len());
+        debug_assert!((image_index) < self.swapchain_batch.images().len());
         self.swapchain_batch.queue_present(
-            image_index,
+            image_index as u32,
             &[self.frame_sync_primitives[frame_index].render_finished_semaphore],
             &self.device.graphic_queue(),
         )
@@ -186,25 +189,25 @@ impl FixedVulkanStuff {
         &mut self,
         frame_index: usize,
         window: &Window,
-    ) -> RenderResult<(u32, bool)> {
-        self.frame_wait_for_fence(frame_index)?;
+    ) -> RenderResult<(usize, bool)> {
+        self.frame_wait_last_finished(frame_index)?;
         let result = self.frame_acquire_next_image(frame_index);
         match result {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                self.recreate(window)?;
-                return Ok((u32::MAX, true));
+                self.refit_window(window)?;
+                return Ok((usize::MAX, true));
             }
             Ok(_) => {}
             Err(e) => return Err(RenderError::VkResult(e)),
         }
         self.frame_reset_fence(frame_index)?;
-        Ok((result?.0, false))
+        Ok((result?.0 as usize, false))
     }
 
     pub fn frame_queue_submit_and_present(
         &mut self,
         frame_index: usize,
-        image_index: u32,
+        image_index: usize,
         window: &Window,
         window_resized: bool,
     ) -> RenderResult<bool> {
@@ -216,22 +219,23 @@ impl FixedVulkanStuff {
             Err(e) => return Err(RenderError::VkResult(e)),
         };
         if need_recreate || window_resized {
-            self.recreate(window)?;
+            self.refit_window(window)?;
         };
 
         Ok(false)
     }
 
-    pub fn cmd_set_viewport_and_scissor(&self, command_buffer: vk::CommandBuffer) {
+    pub fn cmd_set_viewport_and_scissor(&self, frame_index: usize) {
+        debug_assert!(frame_index < Self::MAX_FRAMES_IN_FLIGHT);
         unsafe {
             self.device.cmd_set_viewport(
-                command_buffer,
+                self.graphic_command_buffers[frame_index],
                 0,
                 &[extent_helper::viewport_from_extent(self.surface.extent())],
             );
 
             self.device.cmd_set_scissor(
-                command_buffer,
+                self.graphic_command_buffers[frame_index],
                 0,
                 &[extent_helper::scissor_from_extent(self.surface.extent())],
             );
@@ -240,27 +244,44 @@ impl FixedVulkanStuff {
 
     pub fn cmd_begin_renderpass(
         &self,
-        command_buffer: vk::CommandBuffer,
-        frame_buffer: vk::Framebuffer,
+        frame_index: usize,
+        image_index: usize,
         clear_value: &super::ClearValue,
     ) {
+        debug_assert!(frame_index < Self::MAX_FRAMES_IN_FLIGHT);
+        debug_assert!(image_index < self.swapchain_batch.images().len());
         unsafe {
             self.device.cmd_begin_render_pass(
-                command_buffer,
+                self.graphic_command_buffers[frame_index],
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(self.render_pass)
-                    .framebuffer(frame_buffer)
-                    .render_area(
-                        vk::Rect2D::builder()
-                            .offset(vk::Offset2D { x: 0, y: 0 })
-                            .extent(self.surface.extent())
-                            .build(),
-                    )
+                    .framebuffer(self.swapchain_framebuffers[image_index])
+                    .render_area(extent_helper::scissor_from_extent(self.surface.extent()))
                     .clear_values(&clear_value.to_array())
                     .build(),
                 vk::SubpassContents::INLINE,
             );
         }
+    }
+
+    pub fn device_local_vertex_buffer<T>(&self, vertices: &[T]) -> RenderResult<Buffer<T>> {
+        Buffer::new_device_local(
+            vertices,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            self.device.clone(),
+            &self.graphic_command_pool,
+            &self.device.graphic_queue(),
+        )
+    }
+
+    pub fn device_local_indice_buffer<T>(&self, indices: &[T]) -> RenderResult<Buffer<T>> {
+        Buffer::new_device_local(
+            indices,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            self.device.clone(),
+            &self.graphic_command_pool,
+            &self.device.graphic_queue(),
+        )
     }
 }
 
