@@ -177,8 +177,9 @@ impl WindowApp for TextureArrayExample {
             0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15, 16,
             17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
         ];
-        let vertex_buffer = Vertex::create_buffer(
+        let vertex_buffer = Buffer::new_device_local(
             &model_vertices,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.graphic_command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
@@ -186,6 +187,7 @@ impl WindowApp for TextureArrayExample {
         .unwrap();
         let indice_buffer = Buffer::new_device_local(
             &model_indices,
+            vk::BufferUsageFlags::INDEX_BUFFER,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.graphic_command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),

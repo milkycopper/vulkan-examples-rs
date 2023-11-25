@@ -1,9 +1,8 @@
-use std::{path::Path, rc::Rc};
+use std::path::Path;
 
 use ash::vk;
 use glam::{Vec2, Vec3};
 
-use super::vulkan_objects::{Buffer, Device};
 use crate::error::RenderResult;
 
 #[repr(C)]
@@ -62,44 +61,6 @@ impl Vertex {
                 .offset(memoffset::offset_of!(Vertex, texture_coord) as u32)
                 .build(),
         ]
-    }
-
-    pub fn create_buffer(
-        data: &[Self],
-        device: Rc<Device>,
-        command_pool: &vk::CommandPool,
-        queue: &vk::Queue,
-    ) -> RenderResult<Buffer<Self>> {
-        let vertex_num = data.len();
-
-        let staging_buffer = Buffer::<Self>::new(
-            vertex_num,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            device.clone(),
-        )?;
-
-        let vertex_buffer = Buffer::<Self>::new(
-            vertex_num,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            device.clone(),
-        )?;
-
-        unsafe {
-            let data_ptr = device.map_memory(
-                staging_buffer.device_momory(),
-                0,
-                staging_buffer.size_in_bytes(),
-                vk::MemoryMapFlags::empty(),
-            )?;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr as *mut Vertex, vertex_num);
-            device.unmap_memory(staging_buffer.device_momory());
-        }
-
-        staging_buffer.copy_to(&vertex_buffer, command_pool, queue)?;
-
-        Ok(vertex_buffer)
     }
 }
 

@@ -191,10 +191,16 @@ impl<T> Buffer<T> {
 
     pub fn new_device_local(
         data: &[T],
+        usage: vk::BufferUsageFlags,
         device: Rc<Device>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RenderResult<Self> {
+        assert!(
+            usage == vk::BufferUsageFlags::INDEX_BUFFER
+                || usage == vk::BufferUsageFlags::VERTEX_BUFFER
+        );
+
         let element_num = data.len();
 
         let staging_buffer = {
@@ -210,7 +216,7 @@ impl<T> Buffer<T> {
 
         let device_local_buffer = Buffer::<T>::new(
             element_num,
-            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+            vk::BufferUsageFlags::TRANSFER_DST | usage,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             device.clone(),
         )?;

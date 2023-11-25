@@ -63,8 +63,9 @@ impl WindowApp for DrawTriangleApp {
             pipeline_cache: fixed_vulkan_stuff.pipeline_cache,
         };
         let (pipeline_layout, pipeline) = pipeline_creator.build().unwrap();
-        let vertex_buffer = Vertex::create_buffer(
+        let vertex_buffer = Buffer::new_device_local(
             &model_vertices,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.graphic_command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
@@ -73,6 +74,7 @@ impl WindowApp for DrawTriangleApp {
 
         let indice_buffer = Buffer::new_device_local(
             &[0, 1, 2, 1, 0, 2],
+            vk::BufferUsageFlags::INDEX_BUFFER,
             fixed_vulkan_stuff.device.clone(),
             &fixed_vulkan_stuff.graphic_command_pool,
             &fixed_vulkan_stuff.device.graphic_queue(),
