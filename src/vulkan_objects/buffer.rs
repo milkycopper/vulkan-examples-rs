@@ -96,6 +96,10 @@ impl<T> Buffer<T> {
         self.mapped_ptr.is_some()
     }
 
+    pub fn mapped_ptr(&self) -> Option<*mut c_void> {
+        self.mapped_ptr
+    }
+
     pub fn descriptor(
         &self,
         offset: vk::DeviceSize,
@@ -141,14 +145,23 @@ impl<T> Buffer<T> {
         self.mapped_ptr.take();
     }
 
-    pub fn load_data<D>(&mut self, data: &[D], offset: vk::DeviceSize) -> VkResult<()> {
+    pub fn load_data_when_mapped<D>(&mut self, data: &[D], offset: vk::DeviceSize) {
         let data_size = std::mem::size_of_val(data) as vk::DeviceSize;
         assert!(data_size + offset <= self.size_in_bytes);
         unsafe {
-            let mapped_ptr = self.map_memory(offset, data_size)?;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr as *mut D, data.len());
-            self.unmap_memory();
+            std::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                self.mapped_ptr.unwrap() as *mut D,
+                data.len(),
+            );
         }
+    }
+
+    pub fn load_data<D>(&mut self, data: &[D], offset: vk::DeviceSize) -> VkResult<()> {
+        self.map_memory(offset, std::mem::size_of_val(data) as vk::DeviceSize)?;
+        self.load_data_when_mapped(data, offset);
+        self.unmap_memory();
+
         Ok(())
     }
 
@@ -161,9 +174,9 @@ impl<T> Buffer<T> {
         assert!(self.size_in_bytes == dst.size_in_bytes);
 
         OneTimeCommand::new(&self.device, command_pool)?.take_and_execute(
-            |command| unsafe {
+            |command_buffer| unsafe {
                 self.device.cmd_copy_buffer(
-                    *command.command_buffer(),
+                    command_buffer,
                     self.buffer,
                     dst.buffer,
                     &[vk::BufferCopy::builder().size(self.size_in_bytes).build()],

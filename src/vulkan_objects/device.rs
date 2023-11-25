@@ -1,4 +1,5 @@
 use std::{
+    ffi::CStr,
     ops::Deref,
     rc::{Rc, Weak},
 };
@@ -60,9 +61,8 @@ impl Device {
                     .get_device_queue(queue_info.present_family_index_priority.0, 0),
             }
         };
-
         let physical_device_name = format!("{:?}", unsafe {
-            std::ffi::CStr::from_ptr(
+            CStr::from_ptr(
                 instance
                     .get_physical_device_properties(*physical_device.upgrade().unwrap())
                     .device_name

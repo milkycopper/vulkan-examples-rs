@@ -68,12 +68,12 @@ impl<'a> OneTimeCommand<'a> {
         Ok(())
     }
 
-    pub fn take_and_execute<F>(&self, f: F, queue: &vk::Queue) -> VkResult<()>
+    pub fn take_and_execute<F>(&self, mut f: F, queue: &vk::Queue) -> VkResult<()>
     where
-        F: Fn(&Self) -> VkResult<()>,
+        F: FnMut(vk::CommandBuffer) -> VkResult<()>,
     {
         self.begin()?;
-        f(self)?;
+        f(self.command_buffer)?;
         self.end_and_submit(queue)?;
         Ok(())
     }

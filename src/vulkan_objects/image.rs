@@ -132,7 +132,7 @@ impl Texture {
             .initial_layout(layout)
             .usage(usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(vk::SampleCountFlags::TYPE_1) // TODO: support multisampling
             .build();
 
         unsafe {
@@ -247,7 +247,7 @@ impl Texture {
     }
 
     pub fn spawn_sampler(&mut self, filter: vk::Filter) -> VkResult<()> {
-        self.set_sampler(Rc::new(image_helper::create_texture_sampler(
+        self.set_sampler(Rc::new(image_helper::default_texture_sampler(
             &self.device,
             filter,
         )?));
@@ -270,7 +270,6 @@ impl Texture {
         self.descriptor(*self.image_view().unwrap(), *self.sampler().unwrap())
     }
 
-    /// TODO: support more types of layout transition
     pub fn transition_layout(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -329,53 +328,56 @@ impl Texture {
         )
         .build()?;
 
-        let command = OneTimeCommand::new_and_begin(&device, command_pool)?;
+        OneTimeCommand::new(&device, command_pool)?.take_and_execute(
+            |command_buffer| {
+                texture.transition_layout(
+                    command_buffer,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TRANSFER,
+                );
 
-        texture.transition_layout(
-            *command.command_buffer(),
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-        );
+                let image_copy = vk::BufferImageCopy::builder()
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::builder()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .mip_level(0)
+                            .base_array_layer(0)
+                            .layer_count(1)
+                            .build(),
+                    )
+                    .image_offset(vk::Offset3D::default())
+                    .image_extent(
+                        vk::Extent3D::builder()
+                            .width(image_data.width())
+                            .height(image_data.height())
+                            .depth(1)
+                            .build(),
+                    )
+                    .build();
+                unsafe {
+                    device.cmd_copy_buffer_to_image(
+                        command_buffer,
+                        staging_buffer.buffer(),
+                        texture.image,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &[image_copy],
+                    );
+                }
 
-        let image_copy = vk::BufferImageCopy::builder()
-            .image_subresource(
-                vk::ImageSubresourceLayers::builder()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .mip_level(0)
-                    .base_array_layer(0)
-                    .layer_count(1)
-                    .build(),
-            )
-            .image_offset(vk::Offset3D::default())
-            .image_extent(
-                vk::Extent3D::builder()
-                    .width(image_data.width())
-                    .height(image_data.height())
-                    .depth(1)
-                    .build(),
-            )
-            .build();
-        unsafe {
-            device.cmd_copy_buffer_to_image(
-                *command.command_buffer(),
-                staging_buffer.buffer(),
-                texture.image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[image_copy],
-            );
-        }
+                texture.transition_layout(
+                    command_buffer,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                );
 
-        texture.transition_layout(
-            *command.command_buffer(),
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-        );
-
-        command.end_and_submit(queue)?;
+                Ok(())
+            },
+            queue,
+        )?;
 
         Ok(texture)
     }
@@ -429,59 +431,62 @@ impl Texture {
         .array_layers(layer_count)
         .build()?;
 
-        let command = OneTimeCommand::new_and_begin(&device, command_pool)?;
+        OneTimeCommand::new(&device, command_pool)?.take_and_execute(
+            |command_buffer| {
+                texture.transition_layout(
+                    command_buffer,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TRANSFER,
+                );
 
-        texture.transition_layout(
-            *command.command_buffer(),
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-        );
+                let image_copies = (0..layer_count)
+                    .map(|layer| {
+                        vk::BufferImageCopy::builder()
+                            .image_subresource(
+                                vk::ImageSubresourceLayers::builder()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .mip_level(0)
+                                    .base_array_layer(layer)
+                                    .layer_count(1)
+                                    .build(),
+                            )
+                            .image_offset(vk::Offset3D::default())
+                            .image_extent(
+                                vk::Extent3D::builder()
+                                    .width(width)
+                                    .height(height)
+                                    .depth(texture.depth)
+                                    .build(),
+                            )
+                            .buffer_offset((size_per_layer * layer) as u64)
+                            .build()
+                    })
+                    .collect::<Vec<_>>();
 
-        let image_copies = (0..layer_count)
-            .map(|layer| {
-                vk::BufferImageCopy::builder()
-                    .image_subresource(
-                        vk::ImageSubresourceLayers::builder()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .mip_level(0)
-                            .base_array_layer(layer)
-                            .layer_count(1)
-                            .build(),
-                    )
-                    .image_offset(vk::Offset3D::default())
-                    .image_extent(
-                        vk::Extent3D::builder()
-                            .width(width)
-                            .height(height)
-                            .depth(texture.depth)
-                            .build(),
-                    )
-                    .buffer_offset((size_per_layer * layer) as u64)
-                    .build()
-            })
-            .collect::<Vec<_>>();
+                unsafe {
+                    device.cmd_copy_buffer_to_image(
+                        command_buffer,
+                        staging_buffer.buffer(),
+                        texture.image,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &image_copies,
+                    );
+                }
 
-        unsafe {
-            device.cmd_copy_buffer_to_image(
-                *command.command_buffer(),
-                staging_buffer.buffer(),
-                texture.image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &image_copies,
-            );
-        }
+                texture.transition_layout(
+                    command_buffer,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                );
 
-        texture.transition_layout(
-            *command.command_buffer(),
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-        );
-
-        command.end_and_submit(queue)?;
+                Ok(())
+            },
+            queue,
+        )?;
 
         Ok((texture, layer_count))
     }
@@ -557,7 +562,7 @@ impl DepthStencil {
 pub mod image_helper {
     use super::*;
 
-    pub fn create_texture_sampler(device: &Device, filter: vk::Filter) -> VkResult<vk::Sampler> {
+    pub fn default_texture_sampler(device: &Device, filter: vk::Filter) -> VkResult<vk::Sampler> {
         let create_info = vk::SamplerCreateInfo::builder()
             .mag_filter(filter)
             .min_filter(filter)
