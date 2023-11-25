@@ -11,9 +11,8 @@ use winit::{
 
 use super::{FixedVulkanStuff, UIOverlay};
 use crate::{
-    camera::Camera,
+    camera::{Camera, Direction},
     error::RenderResult,
-    transforms::Direction,
     vulkan_objects::{Device, Instance, VulkanApiVersion},
 };
 

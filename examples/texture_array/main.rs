@@ -291,9 +291,11 @@ impl WindowApp for TextureArrayExample {
             model_vertices,
             model_indices,
 
-            camera: Camera::with_translation(Vec3::new(0., 0., -6.))
-                .with_move_speed(100.)
-                .with_rotate_speed(400.),
+            camera: Camera::builder()
+                .translation(Vec3::new(0., 0., -6.))
+                .move_speed(100.)
+                .rotate_speed(400.)
+                .build(),
             fixed_vulkan_stuff,
             descriptor_set_layout,
             descriptor_pool,

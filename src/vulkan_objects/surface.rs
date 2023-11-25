@@ -121,7 +121,7 @@ fn get_surface_attrs(
     unsafe {
         let capabilities =
             surface_loader.get_physical_device_surface_capabilities(*device, *surface)?;
-        let extent = extent_helper::get_window_extent(&capabilities, window);
+        let extent = get_window_extent(&capabilities, window);
         let format = surface_loader
             .get_physical_device_surface_formats(*device, *surface)?
             .into_iter()
@@ -169,24 +169,21 @@ pub mod extent_helper {
             .extent(extent)
             .build()
     }
+}
 
-    pub(super) fn get_window_extent(
-        capabilities: &vk::SurfaceCapabilitiesKHR,
-        window: &Window,
-    ) -> vk::Extent2D {
-        if capabilities.current_extent.width != u32::MAX {
-            capabilities.current_extent
-        } else {
-            let window_size = window.inner_size();
-            let width = window_size.width.clamp(
-                capabilities.min_image_extent.width,
-                capabilities.max_image_extent.width,
-            );
-            let height = window_size.height.clamp(
-                capabilities.min_image_extent.height,
-                capabilities.max_image_extent.height,
-            );
-            vk::Extent2D::builder().width(width).height(height).build()
-        }
+fn get_window_extent(capabilities: &vk::SurfaceCapabilitiesKHR, window: &Window) -> vk::Extent2D {
+    if capabilities.current_extent.width != u32::MAX {
+        capabilities.current_extent
+    } else {
+        let window_size = window.inner_size();
+        let width = window_size.width.clamp(
+            capabilities.min_image_extent.width,
+            capabilities.max_image_extent.width,
+        );
+        let height = window_size.height.clamp(
+            capabilities.min_image_extent.height,
+            capabilities.max_image_extent.height,
+        );
+        vk::Extent2D::builder().width(width).height(height).build()
     }
 }

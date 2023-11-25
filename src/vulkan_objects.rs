@@ -20,7 +20,8 @@ mod command;
 pub use command::OneTimeCommand;
 
 mod buffer;
-pub use buffer::{memory_helper, Buffer};
+pub(crate) use buffer::memory_helper;
+pub use buffer::Buffer;
 
 mod image;
-pub use image::{format_helper, image_helper, DepthStencil, Texture};
+pub use image::{DepthStencil, Texture};

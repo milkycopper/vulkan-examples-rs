@@ -6,10 +6,9 @@ use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::Window};
 
 use vulkan_example_rs::{
     app::{FixedVulkanStuff, FrameCounter, PipelineBuilder, UIOverlay, WindowApp},
-    camera::Camera,
+    camera::{Camera, MVPMatrix},
     impl_drop_trait, impl_window_fns,
     mesh::Vertex,
-    transforms::MVPMatrix,
     vulkan_objects::{Buffer, Device, Surface},
 };
 
@@ -82,8 +81,13 @@ impl WindowApp for DrawTriangleApp {
 
         let uniform_buffers: [_; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
             array_init::array_init(|_| {
-                let mut buffer =
-                    MVPMatrix::empty_uniform_buffer(fixed_vulkan_stuff.device.clone()).unwrap();
+                let mut buffer = Buffer::<MVPMatrix>::new(
+                    1,
+                    vk::BufferUsageFlags::UNIFORM_BUFFER,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                    fixed_vulkan_stuff.device.clone(),
+                )
+                .unwrap();
                 let ptr = buffer.map_memory_all().unwrap();
                 (buffer, ptr)
             });
@@ -125,9 +129,11 @@ impl WindowApp for DrawTriangleApp {
             pipeline_layout,
             pipeline,
             frame_counter: FrameCounter::default(),
-            camera: Camera::with_translation(Vec3::new(0., 0., -3.))
-                .with_move_speed(100.)
-                .with_rotate_speed(400.),
+            camera: Camera::builder()
+                .translation(Vec3::new(0., 0., -3.))
+                .move_speed(100.)
+                .rotate_speed(400.)
+                .build(),
             descriptor_set_layout,
             descriptor_pool,
             descriptor_sets,
@@ -207,7 +213,7 @@ impl DrawTriangleApp {
         let mvp_matrix = MVPMatrix {
             model: Mat4::IDENTITY,
             view: camera.view_mat(),
-            projection: camera.perspective_mat(),
+            perspective: camera.perspective_mat(),
         };
 
         unsafe {

@@ -247,10 +247,7 @@ impl Texture {
     }
 
     pub fn spawn_sampler(&mut self, filter: vk::Filter) -> VkResult<()> {
-        self.set_sampler(Rc::new(image_helper::default_texture_sampler(
-            &self.device,
-            filter,
-        )?));
+        self.set_sampler(Rc::new(default_texture_sampler(&self.device, filter)?));
         Ok(())
     }
 
@@ -278,7 +275,7 @@ impl Texture {
         src_stage_mask: vk::PipelineStageFlags,
         dst_stage_mask: vk::PipelineStageFlags,
     ) {
-        image_helper::set_image_layout(
+        set_image_layout(
             &self.device,
             command_buffer,
             self.image,
@@ -557,185 +554,6 @@ impl DepthStencil {
     pub fn format(&self) -> vk::Format {
         self.0.format()
     }
-}
-
-pub mod image_helper {
-    use super::*;
-
-    pub fn default_texture_sampler(device: &Device, filter: vk::Filter) -> VkResult<vk::Sampler> {
-        let create_info = vk::SamplerCreateInfo::builder()
-            .mag_filter(filter)
-            .min_filter(filter)
-            .address_mode_u(vk::SamplerAddressMode::REPEAT)
-            .address_mode_v(vk::SamplerAddressMode::REPEAT)
-            .address_mode_w(vk::SamplerAddressMode::REPEAT)
-            .anisotropy_enable(true)
-            .max_anisotropy(unsafe {
-                device
-                    .instance()
-                    .get_physical_device_properties(*device.physical_device().upgrade().unwrap())
-                    .limits
-                    .max_sampler_anisotropy
-            })
-            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
-            .unnormalized_coordinates(false)
-            .compare_enable(false)
-            .compare_op(vk::CompareOp::NEVER)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-            .mip_lod_bias(0.)
-            .max_lod(0.)
-            .min_lod(0.)
-            .build();
-
-        unsafe { device.create_sampler(&create_info, None) }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_image_layout(
-        device: &Device,
-        command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        subsource_range: Option<vk::ImageSubresourceRange>,
-        old_layout: vk::ImageLayout,
-        new_layout: vk::ImageLayout,
-        src_stage_mask: vk::PipelineStageFlags,
-        dst_stage_mask: vk::PipelineStageFlags,
-    ) {
-        // Source access mask controls actions that have to be finished on the old layout
-        // before it will be transitioned to the new layout
-        let mut src_access_mask = match old_layout {
-            vk::ImageLayout::UNDEFINED => {
-                // Image layout is undefined (or does not matter)
-                // Only valid as initial layout
-                // No flags required, listed only for completeness
-                vk::AccessFlags::NONE
-            }
-            vk::ImageLayout::PREINITIALIZED => {
-                // Image is preinitialized
-                // Only valid as initial layout for linear images, preserves memory contents
-                // Make sure host writes have been finished
-                vk::AccessFlags::HOST_WRITE
-            }
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => {
-                // Image is a depth/stencil attachment
-                // Make sure any writes to the depth/stencil buffer have been finished
-                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
-            }
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => {
-                // Image is a transfer source
-                // Make sure any reads from the image have been finished
-                vk::AccessFlags::TRANSFER_READ
-            }
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL => {
-                // Image is a transfer destination
-                // Make sure any writes to the image have been finished
-                vk::AccessFlags::TRANSFER_WRITE
-            }
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
-                // Image is read by a shader
-                // Make sure any shader reads from the image have been finished
-                vk::AccessFlags::SHADER_READ
-            }
-            _ => unimplemented!(),
-        };
-        // Destination access mask controls the dependency for the new image layout
-        let dst_access_mask = match new_layout {
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL => {
-                // Image will be used as a transfer destination
-                // Make sure any writes to the image have been finished
-                vk::AccessFlags::TRANSFER_WRITE
-            }
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => {
-                // Image will be used as a transfer source
-                // Make sure any reads from the image have been finished
-                vk::AccessFlags::TRANSFER_READ
-            }
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => {
-                // Image will be used as a color attachment
-                // Make sure any writes to the color buffer have been finished
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-            }
-            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => {
-                // Image layout will be used as a depth/stencil attachment
-                // Make sure any writes to depth/stencil buffer have been finished
-                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
-            }
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
-                // Image will be read in a shader (sampler, input attachment)
-                // Make sure any writes to the image have been finished
-                if src_access_mask == vk::AccessFlags::NONE {
-                    src_access_mask = vk::AccessFlags::HOST_WRITE | vk::AccessFlags::TRANSFER_WRITE;
-                }
-                vk::AccessFlags::SHADER_READ
-            }
-            _ => unimplemented!(),
-        };
-
-        let barrier = vk::ImageMemoryBarrier::builder()
-            .old_layout(old_layout)
-            .new_layout(new_layout)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(image)
-            .subresource_range(
-                subsource_range.unwrap_or(
-                    vk::ImageSubresourceRange::builder()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .base_mip_level(0)
-                        .layer_count(1)
-                        .base_array_layer(0)
-                        .level_count(1)
-                        .build(),
-                ),
-            )
-            .src_access_mask(src_access_mask)
-            .dst_access_mask(dst_access_mask)
-            .build();
-
-        unsafe {
-            device.cmd_pipeline_barrier(
-                command_buffer,
-                src_stage_mask,
-                dst_stage_mask,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[barrier],
-            )
-        }
-    }
-}
-
-pub mod format_helper {
-    use super::*;
-
-    pub fn filter_supported_format(
-        candidates: &Vec<vk::Format>,
-        tiling: vk::ImageTiling,
-        features: vk::FormatFeatureFlags,
-        device: &Device,
-    ) -> RenderResult<vk::Format> {
-        unsafe {
-            for format in candidates {
-                let format_property = device.instance().get_physical_device_format_properties(
-                    *device.physical_device().upgrade().unwrap(),
-                    *format,
-                );
-
-                if (tiling == vk::ImageTiling::LINEAR
-                    && (format_property.linear_tiling_features & features) == features)
-                    || (tiling == vk::ImageTiling::OPTIMAL
-                        && (format_property.optimal_tiling_features & features) == features)
-                {
-                    return Ok(*format);
-                }
-            }
-
-            Err(RenderError::FormatNotSupported(
-                "Failed to find supported format".to_string(),
-            ))
-        }
-    }
 
     pub fn find_depth_format(device: &Device) -> RenderResult<vk::Format> {
         filter_supported_format(
@@ -750,7 +568,179 @@ pub mod format_helper {
         )
     }
 
-    pub fn has_stencil_component(format: vk::Format) -> bool {
-        format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT
+    pub fn has_stencil_component(&self) -> bool {
+        self.buffer().format == vk::Format::D32_SFLOAT_S8_UINT
+            || self.buffer().format == vk::Format::D24_UNORM_S8_UINT
+    }
+}
+
+fn default_texture_sampler(device: &Device, filter: vk::Filter) -> VkResult<vk::Sampler> {
+    let create_info = vk::SamplerCreateInfo::builder()
+        .mag_filter(filter)
+        .min_filter(filter)
+        .address_mode_u(vk::SamplerAddressMode::REPEAT)
+        .address_mode_v(vk::SamplerAddressMode::REPEAT)
+        .address_mode_w(vk::SamplerAddressMode::REPEAT)
+        .anisotropy_enable(true)
+        .max_anisotropy(unsafe {
+            device
+                .instance()
+                .get_physical_device_properties(*device.physical_device().upgrade().unwrap())
+                .limits
+                .max_sampler_anisotropy
+        })
+        .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+        .unnormalized_coordinates(false)
+        .compare_enable(false)
+        .compare_op(vk::CompareOp::NEVER)
+        .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+        .mip_lod_bias(0.)
+        .max_lod(0.)
+        .min_lod(0.)
+        .build();
+
+    unsafe { device.create_sampler(&create_info, None) }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_image_layout(
+    device: &Device,
+    command_buffer: vk::CommandBuffer,
+    image: vk::Image,
+    subsource_range: Option<vk::ImageSubresourceRange>,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+    src_stage_mask: vk::PipelineStageFlags,
+    dst_stage_mask: vk::PipelineStageFlags,
+) {
+    // Source access mask controls actions that have to be finished on the old layout
+    // before it will be transitioned to the new layout
+    let mut src_access_mask = match old_layout {
+        vk::ImageLayout::UNDEFINED => {
+            // Image layout is undefined (or does not matter)
+            // Only valid as initial layout
+            // No flags required, listed only for completeness
+            vk::AccessFlags::NONE
+        }
+        vk::ImageLayout::PREINITIALIZED => {
+            // Image is preinitialized
+            // Only valid as initial layout for linear images, preserves memory contents
+            // Make sure host writes have been finished
+            vk::AccessFlags::HOST_WRITE
+        }
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => {
+            // Image is a depth/stencil attachment
+            // Make sure any writes to the depth/stencil buffer have been finished
+            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+        }
+        vk::ImageLayout::TRANSFER_SRC_OPTIMAL => {
+            // Image is a transfer source
+            // Make sure any reads from the image have been finished
+            vk::AccessFlags::TRANSFER_READ
+        }
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL => {
+            // Image is a transfer destination
+            // Make sure any writes to the image have been finished
+            vk::AccessFlags::TRANSFER_WRITE
+        }
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
+            // Image is read by a shader
+            // Make sure any shader reads from the image have been finished
+            vk::AccessFlags::SHADER_READ
+        }
+        _ => unimplemented!(),
+    };
+    // Destination access mask controls the dependency for the new image layout
+    let dst_access_mask = match new_layout {
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL => {
+            // Image will be used as a transfer destination
+            // Make sure any writes to the image have been finished
+            vk::AccessFlags::TRANSFER_WRITE
+        }
+        vk::ImageLayout::TRANSFER_SRC_OPTIMAL => {
+            // Image will be used as a transfer source
+            // Make sure any reads from the image have been finished
+            vk::AccessFlags::TRANSFER_READ
+        }
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => {
+            // Image will be used as a color attachment
+            // Make sure any writes to the color buffer have been finished
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+        }
+        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => {
+            // Image layout will be used as a depth/stencil attachment
+            // Make sure any writes to depth/stencil buffer have been finished
+            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+        }
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => {
+            // Image will be read in a shader (sampler, input attachment)
+            // Make sure any writes to the image have been finished
+            if src_access_mask == vk::AccessFlags::NONE {
+                src_access_mask = vk::AccessFlags::HOST_WRITE | vk::AccessFlags::TRANSFER_WRITE;
+            }
+            vk::AccessFlags::SHADER_READ
+        }
+        _ => unimplemented!(),
+    };
+
+    let barrier = vk::ImageMemoryBarrier::builder()
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(image)
+        .subresource_range(
+            subsource_range.unwrap_or(
+                vk::ImageSubresourceRange::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .layer_count(1)
+                    .base_array_layer(0)
+                    .level_count(1)
+                    .build(),
+            ),
+        )
+        .src_access_mask(src_access_mask)
+        .dst_access_mask(dst_access_mask)
+        .build();
+
+    unsafe {
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            src_stage_mask,
+            dst_stage_mask,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[barrier],
+        )
+    }
+}
+
+fn filter_supported_format(
+    candidates: &Vec<vk::Format>,
+    tiling: vk::ImageTiling,
+    features: vk::FormatFeatureFlags,
+    device: &Device,
+) -> RenderResult<vk::Format> {
+    unsafe {
+        for format in candidates {
+            let format_property = device.instance().get_physical_device_format_properties(
+                *device.physical_device().upgrade().unwrap(),
+                *format,
+            );
+
+            if (tiling == vk::ImageTiling::LINEAR
+                && (format_property.linear_tiling_features & features) == features)
+                || (tiling == vk::ImageTiling::OPTIMAL
+                    && (format_property.optimal_tiling_features & features) == features)
+            {
+                return Ok(*format);
+            }
+        }
+
+        Err(RenderError::FormatNotSupported(
+            "Failed to find supported format".to_string(),
+        ))
     }
 }

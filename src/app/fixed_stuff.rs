@@ -6,8 +6,7 @@ use winit::window::Window;
 use crate::{
     error::{RenderError, RenderResult},
     vulkan_objects::{
-        extent_helper, format_helper, DepthStencil, Device, Instance, QueueInfo, Surface,
-        SwapChainBatch,
+        extent_helper, DepthStencil, Device, Instance, QueueInfo, Surface, SwapChainBatch,
     },
 };
 
@@ -79,7 +78,7 @@ impl FixedVulkanStuff {
                     }
                 })
             })?;
-        let depth_format = format_helper::find_depth_format(&device)?;
+        let depth_format = DepthStencil::find_depth_format(&device)?;
         let depth_stencil = DepthStencil::new(surface.extent(), depth_format, device.clone())?;
         let render_pass = create_renderpass(surface.format(), depth_stencil.format(), &device)?;
         let swapchain_framebuffers = create_swapchain_frame_buffer(
