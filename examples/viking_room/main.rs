@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ffi::c_void, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use ash::vk;
 use glam::{Mat4, Vec3};
@@ -33,7 +33,7 @@ struct VikingRoomApp {
     pipeline: vk::Pipeline,
     vertex_buffer: Buffer<Vertex>,
     indice_buffer: Buffer<u32>,
-    uniform_buffers: [(Buffer<MVPMatrix>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
+    uniform_buffers: [Buffer<MVPMatrix>; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
     #[allow(dead_code)]
     texture_image: Texture,
 }
@@ -42,10 +42,11 @@ impl WindowApp for VikingRoomApp {
     impl_window_fns!(VikingRoomApp);
 
     fn draw_frame(&mut self) {
+        let frame_index = self.frame_counter().double_buffer_frame;
         let image_index = {
             let ret = self
                 .fixed_vulkan_stuff
-                .frame_get_image_index_to_draw(self.frame_counter.double_buffer_frame, &self.window)
+                .frame_get_image_index_to_draw(frame_index, &self.window)
                 .unwrap();
             if ret.1 {
                 return;
@@ -53,10 +54,8 @@ impl WindowApp for VikingRoomApp {
             ret.0
         };
 
-        self.update_uniform_buffer(
-            &self.camera,
-            &self.uniform_buffers[self.frame_counter.double_buffer_frame],
-        );
+        self.uniform_buffers[frame_index]
+            .load_data_when_mapped(&[self.camera.mvp_matrix(Mat4::IDENTITY)], 0);
 
         let name = self
             .fixed_vulkan_stuff
@@ -65,17 +64,12 @@ impl WindowApp for VikingRoomApp {
             .to_owned();
         self.update_ui(&[name]);
 
-        self.record_render_commands(
-            self.frame_counter.double_buffer_frame,
-            image_index,
-            self.descriptor_sets[self.frame_counter.double_buffer_frame],
-            self.model_indices.len() as u32,
-        );
+        self.record_render_commands(frame_index, image_index, self.model_indices.len() as u32);
 
         self.window_resized = self
             .fixed_vulkan_stuff
             .frame_queue_submit_and_present(
-                self.frame_counter.double_buffer_frame,
+                frame_index,
                 image_index,
                 &self.window,
                 self.window_resized,
@@ -87,11 +81,6 @@ impl WindowApp for VikingRoomApp {
 
     fn new(event_loop: &EventLoop<()>) -> Self {
         let window = Self::build_window(event_loop);
-
-        let (model_vertices, model_indices) =
-            vulkan_example_rs::mesh::load_obj_model("examples/meshes/viking_room/viking_room.obj")
-                .unwrap();
-
         let fixed_vulkan_stuff = Self::create_fixed_vulkan_stuff(&window).unwrap();
         let descriptor_set_layout =
             Self::create_descriptor_set_layout(&fixed_vulkan_stuff.device).unwrap();
@@ -115,6 +104,9 @@ impl WindowApp for VikingRoomApp {
 
         let (pipeline_layout, pipeline) = pipeline_creator.build().unwrap();
 
+        let (model_vertices, model_indices) =
+            vulkan_example_rs::mesh::load_obj_model("examples/meshes/viking_room/viking_room.obj")
+                .unwrap();
         let vertex_buffer = fixed_vulkan_stuff
             .device_local_vertex_buffer(&model_vertices)
             .unwrap();
@@ -131,8 +123,8 @@ impl WindowApp for VikingRoomApp {
                     fixed_vulkan_stuff.device.clone(),
                 )
                 .unwrap();
-                let ptr = buffer.map_memory_all().unwrap();
-                (buffer, ptr)
+                buffer.map_memory_all().unwrap();
+                buffer
             });
 
         let mut texture_image = Texture::from_rgba8_picture(
@@ -152,7 +144,7 @@ impl WindowApp for VikingRoomApp {
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&[uniform_buffers[i].0.descriptor_default()])
+                    .buffer_info(&[uniform_buffers[i].descriptor_default()])
                     .build();
 
                 let image_descritptor_write = vk::WriteDescriptorSet::builder()
@@ -172,13 +164,7 @@ impl WindowApp for VikingRoomApp {
             }
         }
 
-        let ui_overlay = UIOverlay::new(
-            fixed_vulkan_stuff.pipeline_cache,
-            fixed_vulkan_stuff.render_pass,
-            1.0,
-            fixed_vulkan_stuff.device.clone(),
-        )
-        .unwrap();
+        let ui_overlay = UIOverlay::from_fixed_vulkan_stuff(&fixed_vulkan_stuff, 1.0).unwrap();
 
         VikingRoomApp {
             window,
@@ -241,33 +227,7 @@ impl WindowApp for VikingRoomApp {
 }
 
 impl VikingRoomApp {
-    fn update_uniform_buffer(
-        &self,
-        camera: &Camera,
-        uniform_buffer: &(Buffer<MVPMatrix>, *mut c_void),
-    ) {
-        let mvp_matrix = MVPMatrix {
-            model: Mat4::IDENTITY,
-            view: camera.view_mat(),
-            perspective: camera.perspective_mat(),
-        };
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                &mvp_matrix as *const MVPMatrix,
-                uniform_buffer.1 as *mut MVPMatrix,
-                1,
-            )
-        }
-    }
-
-    fn record_render_commands(
-        &mut self,
-        frame_index: usize,
-        image_index: usize,
-        descriptor_set: vk::DescriptorSet,
-        indice_num: u32,
-    ) {
+    fn record_render_commands(&mut self, frame_index: usize, image_index: usize, indice_num: u32) {
         let command_buffer = self.fixed_vulkan_stuff.graphic_command_buffers[frame_index];
         unsafe {
             self.fixed_vulkan_stuff
@@ -313,7 +273,7 @@ impl VikingRoomApp {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                &[descriptor_set],
+                &[self.descriptor_sets[frame_index]],
                 &[],
             );
 
@@ -321,8 +281,7 @@ impl VikingRoomApp {
                 .device
                 .cmd_draw_indexed(command_buffer, indice_num, 1, 0, 0, 0);
 
-            self.ui_overlay
-                .draw(command_buffer, self.frame_counter.double_buffer_frame);
+            self.ui_overlay.draw(command_buffer, frame_index);
 
             self.fixed_vulkan_stuff
                 .device

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ffi::c_void, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use ash::vk;
 use glam::{vec3, Mat4, Quat, Vec3, Vec4};
@@ -34,7 +34,7 @@ struct TextureArrayExample {
     pipeline: vk::Pipeline,
     vertex_buffer: Buffer<Vertex>,
     indice_buffer: Buffer<u32>,
-    uniform_buffers: [(Buffer<Ubo>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
+    uniform_buffers: [Buffer<Ubo>; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT],
     #[allow(dead_code)]
     texture_image: Texture,
     layer_count: u32,
@@ -46,10 +46,11 @@ impl WindowApp for TextureArrayExample {
     impl_window_fns!(TextureArrayExample);
 
     fn draw_frame(&mut self) {
+        let frame_index = self.frame_counter.double_buffer_frame;
         let image_index = {
             let ret = self
                 .fixed_vulkan_stuff
-                .frame_get_image_index_to_draw(self.frame_counter.double_buffer_frame, &self.window)
+                .frame_get_image_index_to_draw(frame_index, &self.window)
                 .unwrap();
             if ret.1 {
                 return;
@@ -57,10 +58,8 @@ impl WindowApp for TextureArrayExample {
             ret.0
         };
 
-        self.update_uniform_buffer(
-            &self.camera,
-            &self.uniform_buffers[self.frame_counter.double_buffer_frame],
-        );
+        self.uniform_buffers[frame_index]
+            .load_data_when_mapped(&[self.camera.perspective_mat(), self.camera.view_mat()], 0);
 
         let name = self
             .fixed_vulkan_stuff
@@ -69,17 +68,12 @@ impl WindowApp for TextureArrayExample {
             .to_owned();
         self.update_ui(&[name]);
 
-        self.record_render_commands(
-            self.frame_counter.double_buffer_frame,
-            image_index,
-            self.descriptor_sets[self.frame_counter.double_buffer_frame],
-            self.model_indices.len() as u32,
-        );
+        self.record_render_commands(frame_index, image_index, self.model_indices.len() as u32);
 
         self.window_resized = self
             .fixed_vulkan_stuff
             .frame_queue_submit_and_present(
-                self.frame_counter.double_buffer_frame,
+                frame_index,
                 image_index,
                 &self.window,
                 self.window_resized,
@@ -184,7 +178,7 @@ impl WindowApp for TextureArrayExample {
             .device_local_indice_buffer(&model_indices)
             .unwrap();
 
-        let uniform_buffers: [(Buffer<Ubo>, *mut c_void); FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
+        let uniform_buffers: [_; FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT] =
             array_init::array_init(|_| {
                 let mut buffer = Buffer::<Ubo>::new(
                     1,
@@ -210,10 +204,10 @@ impl WindowApp for TextureArrayExample {
                 buffer
                     .load_data(&ubo_data.instances, std::mem::size_of::<Mat4>() as u64 * 2)
                     .unwrap();
-                let ptr = buffer
+                buffer
                     .map_memory(0, std::mem::size_of::<Mat4>() as u64 * 2)
                     .unwrap();
-                (buffer, ptr)
+                buffer
             });
 
         let descriptor_set_layout =
@@ -246,7 +240,7 @@ impl WindowApp for TextureArrayExample {
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&[uniform_buffers[i].0.descriptor_default()])
+                    .buffer_info(&[uniform_buffers[i].descriptor_default()])
                     .build();
 
                 let image_descritptor_write = vk::WriteDescriptorSet::builder()
@@ -336,25 +330,7 @@ impl WindowApp for TextureArrayExample {
 }
 
 impl TextureArrayExample {
-    fn update_uniform_buffer(&self, camera: &Camera, uniform_buffer: &(Buffer<Ubo>, *mut c_void)) {
-        let pv_matrix = [camera.perspective_mat(), camera.view_mat()];
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                &pv_matrix as *const Mat4,
-                uniform_buffer.1 as *mut Mat4,
-                2,
-            )
-        }
-    }
-
-    fn record_render_commands(
-        &mut self,
-        frame_index: usize,
-        image_index: usize,
-        descriptor_set: vk::DescriptorSet,
-        indice_num: u32,
-    ) {
+    fn record_render_commands(&mut self, frame_index: usize, image_index: usize, indice_num: u32) {
         let command_buffer = self.fixed_vulkan_stuff.graphic_command_buffers[frame_index];
         unsafe {
             self.fixed_vulkan_stuff
@@ -400,7 +376,7 @@ impl TextureArrayExample {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                &[descriptor_set],
+                &[self.descriptor_sets[frame_index]],
                 &[],
             );
 
@@ -413,8 +389,7 @@ impl TextureArrayExample {
                 0,
             );
 
-            self.ui_overlay
-                .draw(command_buffer, self.frame_counter.double_buffer_frame);
+            self.ui_overlay.draw(command_buffer, frame_index);
 
             self.fixed_vulkan_stuff
                 .device

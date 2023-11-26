@@ -308,6 +308,10 @@ impl UIOverlay {
         })
     }
 
+    pub fn from_fixed_vulkan_stuff(s: &FixedVulkanStuff, scale: f32) -> RenderResult<Self> {
+        Self::new(s.pipeline_cache, s.render_pass, scale, s.device.clone())
+    }
+
     pub fn update(&mut self, frame_index: usize) -> RenderResult<bool> {
         assert!(frame_index < FixedVulkanStuff::MAX_FRAMES_IN_FLIGHT);
 
