@@ -192,11 +192,7 @@ pub trait WindowApp {
     }
 
     fn on_keyboard_input(&mut self, key_code: VirtualKeyCode) {
-        let duration = SystemTime::now()
-            .duration_since(self.frame_counter().last_fps_update_time_stamp)
-            .unwrap()
-            .as_secs_f32()
-            / (self.frame_counter().count_since_last_update() + 1) as f32;
+        let duration = self.frame_counter().fps.recip() as f32;
         match key_code {
             VirtualKeyCode::W => self.camera().translate_in_time(Direction::Up, duration),
             VirtualKeyCode::S => self.camera().translate_in_time(Direction::Down, duration),

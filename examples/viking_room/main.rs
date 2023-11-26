@@ -192,7 +192,7 @@ impl WindowApp for VikingRoomApp {
             camera: Camera::builder()
                 .translation(Vec3::new(0., 0., -3.))
                 .move_speed(100.)
-                .rotate_speed(400.)
+                .rotate_speed(40.)
                 .build(),
             fixed_vulkan_stuff,
             descriptor_set_layout,

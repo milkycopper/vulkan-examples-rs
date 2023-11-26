@@ -124,7 +124,7 @@ impl WindowApp for DrawTriangleApp {
             camera: Camera::builder()
                 .translation(Vec3::new(0., 0., -3.))
                 .move_speed(100.)
-                .rotate_speed(400.)
+                .rotate_speed(40.)
                 .build(),
             descriptor_set_layout,
             descriptor_pool,
