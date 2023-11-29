@@ -5,7 +5,7 @@ use winit::window::Window;
 
 use crate::{
     error::{RenderError, RenderResult},
-    vulkan_objects::{
+    vulkan_wrappers::{
         extent_helper, Buffer, DepthStencil, Device, Instance, QueueInfo, Surface, SwapChainBatch,
     },
 };

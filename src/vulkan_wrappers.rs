@@ -1,5 +1,5 @@
 mod instance;
-pub use instance::{Instance, InstanceBuilder, VulkanApiVersion};
+pub use instance::{Instance, InstanceBuilder, VulkanApiVersion, VulkanDebugInfoStrategy};
 
 mod surface;
 pub use surface::{extent_helper, Surface, SurfaceAttributes};

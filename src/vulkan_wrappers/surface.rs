@@ -29,6 +29,7 @@ pub struct Surface {
 impl Surface {
     /// `instance` must be built with window supported
     pub fn new(window: &Window, instance: Rc<Instance>, format: vk::Format) -> RenderResult<Self> {
+        assert!(instance.support_window());
         let surface_khr = unsafe {
             ash_window::create_surface(
                 instance.entry(),

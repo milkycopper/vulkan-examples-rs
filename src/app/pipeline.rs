@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::{
     error::RenderResult,
-    vulkan_objects::{extent_helper, Device, ShaderCreate, ShaderModule},
+    vulkan_wrappers::{extent_helper, Device, ShaderCreate, ShaderModule},
 };
 
 pub trait PipelineBuilder<'a, P: AsRef<Path>> {

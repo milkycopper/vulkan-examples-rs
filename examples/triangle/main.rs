@@ -9,7 +9,7 @@ use vulkan_example_rs::{
     camera::{Camera, MVPMatrix},
     impl_drop_trait, impl_pipeline_builder_fns, impl_window_fns,
     mesh::Vertex,
-    vulkan_objects::{Buffer, Device},
+    vulkan_wrappers::{Buffer, Device},
 };
 
 struct DrawTriangleApp {

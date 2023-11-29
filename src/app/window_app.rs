@@ -13,7 +13,7 @@ use super::{FixedVulkanStuff, UIOverlay};
 use crate::{
     camera::{Camera, Direction},
     error::RenderResult,
-    vulkan_objects::{Device, Instance, VulkanApiVersion},
+    vulkan_wrappers::{Device, Instance, VulkanApiVersion, VulkanDebugInfoStrategy},
 };
 
 #[derive(Clone, Copy)]
@@ -217,7 +217,7 @@ pub trait WindowApp {
                 .app_name_and_version(Self::window_title().as_str(), 0)
                 .engine_name_and_version("No Engine", 0)
                 .vulkan_api_version(VulkanApiVersion::V1_0)
-                .enable_validation_layer(true)
+                .debug_strategy(VulkanDebugInfoStrategy::DEFAULT_PRINT_ALL)
                 .build()?,
         );
         FixedVulkanStuff::new(window, instance)

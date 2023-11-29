@@ -8,7 +8,7 @@ use super::{FixedVulkanStuff, PipelineBuilder};
 use crate::{
     error::{RenderError, RenderResult},
     impl_pipeline_builder_fns,
-    vulkan_objects::{Buffer, Device, OneTimeCommand, Texture},
+    vulkan_wrappers::{Buffer, Device, OneTimeCommand, Texture},
 };
 
 #[derive(Clone, Copy)]

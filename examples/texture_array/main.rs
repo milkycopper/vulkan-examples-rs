@@ -9,7 +9,7 @@ use vulkan_example_rs::{
     camera::Camera,
     impl_drop_trait, impl_pipeline_builder_fns, impl_window_fns,
     mesh::Vertex,
-    vulkan_objects::{Buffer, Device, Texture},
+    vulkan_wrappers::{Buffer, Device, Texture},
 };
 
 const MAX_ARRAY_COUNT: usize = 8;
